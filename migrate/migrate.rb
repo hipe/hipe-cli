@@ -1,5 +1,7 @@
 #!/usr/bin/env ruby
 require File.dirname(__FILE__)+'/../cli'
+require 'hpricot'
+require 'csv'
 
 module Markus
   module Migrate

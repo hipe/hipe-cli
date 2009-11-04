@@ -1,6 +1,7 @@
 require 'rubygems'
 require 'getopt/long'
 require 'pp'
+require File.dirname(__FILE__)+'/filestuff'
 
 module Markus
   module Cli  
@@ -17,6 +18,7 @@ module Markus
         @cliCommand = nil
         @cliOptions = {}
         @cliArguments = []
+        @cliCommands = {}
       end
       
       def cli_post_init
@@ -33,8 +35,9 @@ module Markus
         end        
         names = []
         self.methods.each do |meth| 
-          if ((mx = /^cli_execute_(.*)$/.match(meth)) && @cliCommands[mx[1].to_sym].nil?)
-            @cliCommands[mx[1].to_sym] = {}
+          #if ((mx = /^cli_execute_(.*)$/.match(meth)) && @cliCommands[mx[1].to_sym].nil?)
+          if ((m = /^cli_execute_(.*)$/.match(meth)) && @cliCommands[m[1].to_sym].nil?)
+            @cliCommands[m[1].to_sym] = {:name=>m[1].to_sym, :description=>'(user-defined method)'}
           end
         end
       end
@@ -58,24 +61,36 @@ module Markus
       # this-script.rb command-name --opt="x" --opt2="x y" [filename1 [filename2 [...]]] ...    
       def cli_run(argList=nil)
 
-       # so parse out a string not starting with a dash, zero or more ones starting with a dash, 
-       # and zero or more not starting with a dash
-        #begin
-          argList = argList.nil? ? ARGV : argList
+        # so parse out a string not starting with a dash, zero or more ones starting with a dash, 
+        # and zero or more not starting with a dash
+        argList = argList.nil? ? ARGV : argList       
+        begin
+          @cliArgumentValidations = [] if @cliArgumentValidations.nil?
           @cliCommandData = parse_command   argList
           @cliArguments   = parse_arguments argList
           @cliOptions     = parse_options   argList
-      #rescue SyntaxError => e
-      #  str = e.message+"\n"+cli_usage_message
-      #  puts str
-      #  return
-      #end
+          cli_run_validations if @cliArgumentValidations.size > 0
+        rescue SyntaxError,SoftException => e
+          str = e.message+"\n"+cli_usage_message
+          puts str
+          return
+        end
         method_name = 'cli_execute_'+(@cliCommandData[:name].to_s)
-        self.__send__(method_name)
+        __send__(method_name)
       end #def cli_run
       
-      protected
+      def cli_validate(validations, name, value)
+        validations.each do |validationData|
+          __send__('cli_validate_'+validationData.to_s, name, value)
+        end
+      end
       
+      def cli_validate_file_must_exist(name,value)
+        FileStuff.file_must_exist(value)
+      end
+      
+      protected
+            
       def self.truncate(str,maxLen,ellipses='...')
         if (str.nil?)
           ''
@@ -90,16 +105,13 @@ module Markus
       
       def describe_command(commandData, opts={})
         if (opts[:length] && opts[:length]==:one_line)
-          if commandData[:description].nil?
-            s = ''
-          else
-            s = sprintf('%-28s',switch( commandData[:name] ))+App.truncate(commandData[:description],50)
-          end
+          descr = commandData[:description].nil? ? '(no description)' : commandData[:description]
+          s = sprintf('%-28s',switch( commandData[:name] ))+App.truncate(descr,50)
         else
           parts = []
           args_desc_lines = []
           opts_desc_lines = []
-          parts << "\nUsage: \n  #{__FILE__} #{commandData[:name].to_s}"
+          parts << "\nUsage: \n  #{$PROGRAM_NAME} #{commandData[:name].to_s}"
           if (commandData[:options] && commandData[:options].size > 0)
             parts << "[OPTIONS]"
           end
@@ -178,6 +190,7 @@ module Markus
           dirtyArgs << argList.pop
         end
         dirtyArgs.reverse!
+        
         # shlurp all required arguments, barking if they are missing
         if (!@cliCommandData[:arguments].nil? and !@cliCommandData[:arguments][:required].nil? )
           @cliCommandData[:arguments][:required].each do |arg|
@@ -187,7 +200,9 @@ module Markus
                 :arg_name => arg[:name]
               )
             end
-            namedArgs[arg[:name]] = dirtyArgs.shift
+            value = dirtyArgs.shift
+            namedArgs[arg[:name]] = value
+            cli_validate( arg[:validations], arg[:name], value ) unless arg[:validations].nil?
           end
         end # if
 
@@ -195,7 +210,10 @@ module Markus
         if (!@cliCommandData[:arguments].nil? and !@cliCommandData[:arguments][:optional].nil? )
           names = @cliCommandData[:arguments][:optional].collect{ |x| x[:name] }
           while ( dirtyArgs.size > 0 && names.size > 0 )
-            namedArgs[names.shift] = dirtyArgs.shift
+            name = names.shift
+            namedArgs[name] = dirtyArgs.shift
+            cli_validate( arg[:validations], arg[:name], value ) unless  
+              @cliCommandData[:arguments][:optional][name][:validations].nil?
           end
         end
         
@@ -206,7 +224,6 @@ module Markus
             :args => dirtyArgs
           )
         end
-        
         return namedArgs
       end
       

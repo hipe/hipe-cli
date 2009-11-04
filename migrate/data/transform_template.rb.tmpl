@@ -1,17 +1,18 @@
+#!/usr/bin/env ruby
 # originally generated on %%timestamp%% by %%app name%%
-
+require 'markus/migrate/migrate'
 module Markus
   module Migrate
     class YourTransform < Migrate
       def initialize
-        
+        super
         # with_rows_matching_pattern below is for "pre-processing" the CSV file before it is transformed
         @with_rows_matching_pattern = [
           # skip blank rows
           {:pattern => /^,*$/,       :action => :skip}, 
           
           # if the first field is used as a section header, flatten it into a data field for all following rows
-          {:pattern => /^([^,]+),*/, :flatten_to => 'new_field_name'}
+          {:pattern => /^([^,]+),*/, :flatten_to => 'new_field_name'},
 
           
           # indicate which line number indicates the field names
@@ -29,4 +30,4 @@ module Markus
   end
 end
 
-Markus::Migrate::YourTransform.new.cliRun if $PROGRAM_NAME == __FILE__
+Markus::Migrate::YourTransform.new.cli_run if $PROGRAM_NAME == __FILE__
