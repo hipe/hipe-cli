@@ -57,9 +57,10 @@ module Markus
         STDERR.puts(msg)
       end
       
-      def csv_to_xml_add_row; end
-      
-      def csv_to_xml_finish; end
+      # can be overridden by client
+      def csv_to_xml_finish; 
+        STDOUT << @doc.to_s if @doc
+      end
       
       def cli_execute_csv_to_xml
         csv_to_xml_start
@@ -86,7 +87,7 @@ module Markus
             @fieldNames.each do |stringKey, numericIndex|
               useRow[stringKey] = row[numericIndex]
             end
-            # useRow.merge!(@extraFields)
+            useRow.merge!(@extraFields)
           else
             useRow = row
           end

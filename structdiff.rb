@@ -28,11 +28,8 @@ module Markus
     end
     
     def filter_for(field,hand,&proc)
-      puts "requested_/#{field}\\_/#{hand}\\_\n"
       if (field.nil?)
         @filter[hand] = proc
-        pp @filter
-        
       elsif (@childNames[field])
         @childNames[field].each do |hand2|
           @diff[hand2][field].filter_for(nil,hand,&proc)
@@ -41,11 +38,11 @@ module Markus
     end    
     
     def left_value_for(field, &proc)
-      filter_for(field,:left,proc)
+      filter_for(field,:left,&proc)
     end
     
     def right_value_for(field, &proc)
-      filter_for(field,:right,proc)
+      filter_for(field,:right,&proc)
     end    
         
     def self.diff obj1, obj2 
