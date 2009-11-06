@@ -15,19 +15,24 @@ module Markus
       include Getopt    
 
       def cli_pre_init
+        # the below hold the entire "grammar" and help documentation for the interface of your cli app
+        @cliCommands = {}
+        @cliGlobalOptions = {}
+        
+        # the below are the result of parsing the user's input
         @cliCommand = nil
         @cliOptions = {}
         @cliArguments = []
-        @cliCommands = {}
+
       end
       
       def cli_post_init
         if (@cliCommands[:help].nil?)
           @cliCommands[:help] = {
             :name => :help, # wanky
-            :description => 'Show detailed help for a given COMMAND',
+            :description => 'Show detailed help for a given COMMAND, or general help',
             :arguments => {
-              :required => [
+              :optional => [
                 {:name=>:COMMAND_NAME}
               ]
             }
@@ -35,17 +40,16 @@ module Markus
         end        
         names = []
         self.methods.each do |meth| 
-          #if ((mx = /^cli_execute_(.*)$/.match(meth)) && @cliCommands[mx[1].to_sym].nil?)
           if ((m = /^cli_execute_(.*)$/.match(meth)) && @cliCommands[m[1].to_sym].nil?)
             @cliCommands[m[1].to_sym] = {:name=>m[1].to_sym, :description=>'(user-defined method)'}
           end
         end
       end
-      
+            
       def cli_usage_message
         s = 'Usage: '
         if (@cliCommandData.nil?)
-          s << File.basename(__FILE__)+" COMMAND [OPTIONS] [ARGUMENTS]\n" + 
+          s << $PROGRAM_NAME +" COMMAND [OPTIONS] [ARGUMENTS]\n" + 
           "commands:\n"
           @cliCommands.each do |key, commandData|
             commandData[:name] = key unless commandData[:name]
@@ -63,30 +67,52 @@ module Markus
 
         # so parse out a string not starting with a dash, zero or more ones starting with a dash, 
         # and zero or more not starting with a dash
-        argList = argList.nil? ? ARGV : argList       
+        argList ||= ARGV
         begin
-          @cliArgumentValidations = [] if @cliArgumentValidations.nil?
           @cliCommandData = parse_command   argList
           @cliArguments   = parse_arguments argList
           @cliOptions     = parse_options   argList
-          cli_run_validations if @cliArgumentValidations.size > 0
         rescue SyntaxError,SoftException => e
           str = e.message+"\n"+cli_usage_message
           puts str
           return
         end
+                
         method_name = 'cli_execute_'+(@cliCommandData[:name].to_s)
+        
+        #puts "\n\nAbout to request #{method_name} with this grammar:\n"; pp @cliCommandData; exit
+
         __send__(method_name)
       end #def cli_run
       
-      def cli_validate(validations, name, value)
-        validations.each do |validationData|
-          __send__('cli_validate_'+validationData.to_s, name, value)
+      # several validations for one value
+      def cli_validate(validations, name, value, extra={})
+        
+        return if (extra[:isOption] && value.nil?) # or iterate over the otpions 
+        validations.each do |valData|
+          valName = if (valData.instance_of?(Symbol) || valData.instance_of?(String))
+            valData.to_s
+          else 
+            valData[:type].to_s
+          end
+          methName = 'cli_validate_'+valName
+
+          __send__('cli_validate_'+valName, name, value, valData)
         end
       end
       
-      def cli_validate_file_must_exist(name,value)
+      def cli_validate_file_must_exist(name,value,extra)
         FileStuff.file_must_exist(value)
+      end
+
+      def cli_validate_regex(validation,varName,varHash)
+        #puts "validation; "; pp validation; puts "varname: '#{varName}'";  pp varName; puts "hash: "; pp varHash;
+        value = varHash[varName]  
+        re = validation[:regex]
+        if (! matches = (re.match(value))) 
+          raise SyntaxError.new(validation[:message]+' (your value: "'+value+'", re: '+re.to_s+')')
+        end
+        varHash[varName] = matches # clobbers original ! 
       end
       
       protected
@@ -112,6 +138,9 @@ module Markus
           args_desc_lines = []
           opts_desc_lines = []
           parts << "\nUsage: \n  #{$PROGRAM_NAME} #{commandData[:name].to_s}"
+          
+          #cli_populate_global_options(commandData) if (0<@cliGlobalOptions.size)
+                    
           if (commandData[:options] && commandData[:options].size > 0)
             parts << "[OPTIONS]"
           end
@@ -138,16 +167,24 @@ module Markus
           end
           if (commandData[:options])
             commandData[:options].each do |k,v|
-              opts_desc_lines << sprintf('%-10s', switch( k )) + 
-              (commandData[:description] ? commandData[:description] : '')
+
+                unless (v.instance_of? Hash)
+                  pp commandData
+                  puts "ls;akfjleskfjesalkfjesak;"
+                  exit
+                end
+                
+              opts_desc_lines << sprintf('--%-26s', switch( k )+'=ARG') + 
+              (v[:description] ? v[:description] : '')
             end
           end
           sections = []
           grammar = parts.join(' ');
           sections << commandData[:description] if commandData[:description]
           sections << grammar if (grammar.length > 0)
-          sections << ("options:\n  "+ opts_desc_lines.join("\n  ")) if opts_desc_lines.size > 0          
-          sections << ("arguments:\n  "+ args_desc_lines.join("\n  ")) if args_desc_lines.size > 0          
+          sections << ("\nArguments:\n\n  "+ args_desc_lines.join("\n  ")) if args_desc_lines.size > 0
+          sections << ("\n\nOptions:\n\n  "+ opts_desc_lines.join("\n\n  ")) if opts_desc_lines.size > 0
+          sections << "\n"
           s = sections.join("\n");
         end # else show grammar
         if (s.nil?) 
@@ -155,6 +192,11 @@ module Markus
         end
         return s
       end
+      
+      def cli_populate_global_options(commandData)
+        commandData[:options] ||= {}
+        commandData[:options].merge!(@cliGlobalOptions) { |key, oldVal, newVal| oldVal.nil? ? newVal : oldVal }
+      end 
       
       def parse_command(argList)
         raise SyntaxError.new('Please indicate a command.') if (argList.size==0)
@@ -228,14 +270,39 @@ module Markus
       end
       
       def parse_options(argList)
+        cli_populate_global_options @cliCommandData        
         return {} if (@cliCommandData[:options].nil?)
         optsGrammar = []
-        @cliCommandData[:options].each do |key,optData|
-          optsGrammar.push(['--'+key.to_s, nil, REQUIRED]) #for now we don't ever have switches just named args
+        @cliCommandData[:options].each do |key,value|
+          arr = ['--'+key.to_s.gsub('_','-'), nil, ( value[:getopt_type] || REQUIRED )]
+          optsGrammar.push(arr)
+        end 
+        
+        begin
+          givenOpts = Long.getopts(*optsGrammar); # splat operator makes an array into a series of arguments
+        rescue Getopt::Long::Error => e
+          raise SyntaxError.new( e.message )
         end
-        opts = Long.getopts(*optsGrammar); # splat operator makes an array into a series of arguments
-        # above might raise
-        return opts
+        
+        ppp :GIVENOPS, givenOpts
+        
+        givenOpts.keys.each{ |k| givenOpts[k.gsub(/-/,'_').to_sym] = givenOpts[k]; givenOpts.delete(k) }
+        doTheseKeys = givenOpts.keys & @cliCommandData[:options].keys
+        doTheseKeys.each do |k|  
+          grammar = @cliCommandData[:options][k]
+          if (grammar[:validations])
+            grammar[:validations].each do |validation|
+              validationMeth = 'cli_validate_'+validation[:type].to_s  #note we don't want it to be option specific
+              __send__(validationMeth, validation, k, givenOpts)
+            end
+          end
+        end
+
+        doTheseKeys.each do |k|
+          processingMeth = 'cli_process_option_'+k.to_s
+          __send__(processingMeth, givenOpts, k)
+        end
+        return givenOpts
       end
       
       def switch(sym_or_string)
@@ -247,7 +314,6 @@ module Markus
           sym_or_string
         end
       end
-      
     end #module App
   end #module Cli
 end #module Markus

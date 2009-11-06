@@ -12,6 +12,13 @@ module Markus
       def initialize
         cli_pre_init
         @cliDescription = "Pulls in data from excel sheets and spits it out to XML"
+        @cliGlobalOptions = {
+          :debug => {
+            :description => 'Type one thru six d\'s (e.g. "-ddd" to indicate varying degrees of '+
+            'debugging output (put to STDERR).',
+            :getopt_type => Getopt::INCREMENT
+          }
+        }
         @cliCommands = {
           :generate_transform_scaffold => {
             :description => 'Generates a transformation file template '+
@@ -20,6 +27,34 @@ module Markus
           :csv_to_xml => {
             :description => 'the csv will be run through the filter and data will be added '+
             'to an existing xml document (by calling user-defined methods.) Outputs result to STDOUT.',
+            :options => {
+              :fields => { 
+                :description => "comma-separated list of line numbers to use to (re-)set the field names of the columns",
+                :validations => [
+                  {:type=>:regex, :regex=>/^\d+(?:, *\d+)*$/, :message=>'must have only numbers and commas'}
+                ]                
+              },
+              :skip => {
+                :name => :skip,
+                :description => "comma-separated list of line numbers to skip, starting at line 1."+
+                "  (blank lines are skipped by default.)",
+                :validations => [
+                  {:type=>:regex, :regex=>/^\d+(?:, *\d+)*$/, :message=>'must have only numbers and commas'}
+                ]
+              },
+              :section => {                
+                :description => "when a cel is used as a sect",#ion divider, you can turn it into a virtual field value"+
+                #" for all the following rows (until the next section)  Please provide a string like this: \"A country\""+
+                #" to match any row where there is only data in column 'A', and \"flatten\" that field to stand for a field"+
+                #" called 'country'",
+                :validations=>[
+                  { :type=>:regex,
+                    :regex=>/^([A-Z]+)(?:(\d+))? (.+)$/, 
+                    :message=>'Invalid specifiction -- please follow the pattern "AA:11 field_name"'
+                  }
+                ]
+              }
+            },
             :arguments => {
               :required => [
                 { :name => :CSV_FILE, 
@@ -43,12 +78,51 @@ module Markus
     
       protected 
       
+      def cli_process_option_skip(givenOpts, k)
+        lineNumbers = givenOpts[:skip][0].split(/, */).map{|s| s.to_i}
+        givenOpts[:skip] = lineNumbers
+        lineNumbers.each do |i|
+          @withRowsMatchingPattern << {:line_index => i-1, :action => :skip}
+        end
+      end
+      
+      def cli_process_option_fields(givenOpts, k)
+        lineNumbers = givenOpts[:fields][0].split(/, */).map{|s|s.to_i}
+        givenOpts[:fields] = lineNumbers
+        lineNumbers.each do |i|
+          @withRowsMatchingPattern << {:line_index => i-1, :action => :fields}
+        end
+      end
+      
+      def cli_process_option_section(givenOpts, k)
+        m = givenOpts[:section]
+        col, row, fieldName = m[1], m[2], m[3]
+        raise Exception.new('sorry, specific row is not yet implemented!') if row
+        raise Exception.new("For column please indicate a letter A-Z for now, not '#{col}'.") unless /^[A-Z]$/ =~ col
+        numberOfCommas = (col[0]-65) # "A" is ascii number 65
+        @withRowsMatchingPattern << { 
+          :pattern    => Regexp.new('/^'+(','*numberOfCommas)+'([^,]+),*$/'), 
+          :action     => :section,
+          :field_name => fieldName
+        }
+      end
+      
+      def cli_process_option_debug(givenOpts, k)
+        ppp :FIX_THIS_BADBOYS, givenOpts
+      end
+       
+      def ppp name, value, die=true
+        puts "\n\n#{name.to_s}:\n";
+        pp value
+        puts "\n"+File.basename(__FILE__)+__LINE__.to_s
+        exit if die
+      end 
+      
       def build_xml
         return Builder::XmlMarkup.new(:indent=>2, :margin=>4)
       end
 
       def csv_to_xml_start; 
-
       end
       
       def log_change msg
@@ -71,6 +145,9 @@ module Markus
         @csvRows.each_with_index do |row,index|     
           matchingPatternData = nil
           @withRowsMatchingPattern.each do |patternData|
+            
+            #puts "line: "+row.join(',');
+            
             if (
               (patternData[:line_index] && index==patternData[:line_index]) ||
               (patternData[:pattern]    && patternData[:pattern].match(row.join(',')))
@@ -78,6 +155,9 @@ module Markus
               matchingPatternData = patternData
               break
             end
+            
+            #fputs "we got it? "+(!! matchingPatternData);
+            
           end
           doThis = matchingPatternData ? matchingPatternData[:action].to_s : 'default'
           # STDERR.print "#{doThis}."
@@ -105,12 +185,12 @@ module Markus
         }
       end      
       
-      def csv_process_row_flatten_section_name_to_field_value(patternData, row, index, opts)
+      def csv_process_row_section(patternData, row, index, opts)
         @extraFields ||= {}
         @extraFields[patternData[:field_name]] = opts[:orig_row][0]
       end
       
-      def csv_process_row_is_field_names(patternData, row, index, xtra)
+      def csv_process_row_fields(patternData, row, index, xtra)
         origRow = xtra[:orig_row]
         @fieldNames = {}
         origRow.each_with_index do |value,index|
@@ -132,3 +212,4 @@ module Markus
 end #module Markus
 
 Markus::Migrate::Migrate.new.cli_run if $PROGRAM_NAME == __FILE__
+# * -- comments with just an asterisk above ('#*') indicate stuff that will be cleaned up later
