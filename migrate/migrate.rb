@@ -26,8 +26,8 @@ module Markus
         @cliGlobalOptions[:debug] = @@cliCommonOptions[:debug]
         @cliGlobalOptions[:client_log] = {
           :description => 'A filename for client-specific warnings and notices.',
-          :validations => [:file_must_not_exist],
-          :action => {:action=>:open_file, :as=>'w+'}
+          #:validations => [:file_must_not_exist],  nah, overwrite the file
+          :action => {:action=>:open_file, :as=>'w'}
         }
         @cliCommands[:make_transform_scaffold] = {
           :description => 'Generates a transformation file template '+
@@ -148,6 +148,8 @@ module Markus
         end
       end
       
+      def cli_process_option_client_log(a,b); end  # nothing to do! file already opened
+      
       def xml_builder
         return Builder::XmlMarkup.new(:indent=>2, :margin=>4)
       end
@@ -156,6 +158,7 @@ module Markus
       #end
 
       def client_log msg
+        cli_file(:client_log).puts msg
         @changeLog ||= File.open('./client-log', 'a+')        
         @changeLog.puts(msg)
         STDERR.puts(msg)
@@ -190,6 +193,7 @@ module Markus
       
       def cli_execute_csv_to_xml
         #csv_to_xml_start
+        client_log(%{============== Processing CSV (Spreadsheet) File: "#{@cliArguments[:CSV_FILE]}"=============})
         @xmlDoc = Hpricot cli_file(:STARTING_XML_FILE)
         @csvRows = CSV.read @cliArguments[:CSV_FILE]
         if (@csvRows.size < 1)
@@ -217,6 +221,7 @@ module Markus
         rescue MigrateFailure => e
           puts e.message
         end
+        client_log(%{============== Finished Processing CSV (Spreadsheet) File: "#{@cliArguments[:CSV_FILE]}"=============})        
       end
       
       def get_processed_row

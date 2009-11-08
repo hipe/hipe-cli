@@ -46,7 +46,7 @@ module Markus
         @cliFiles =     {} # filehandles and filenames to files the user may have passed as arguments or options        
 
         # housekeeping
-        @cliLogLevel = 0
+        @cliLogLevel = nil # when set to nil it is supposed to let every debugging message thru to STDERR
       end
       
       def cli_post_init #* this might get replaced by an "add command" type of thing
@@ -86,7 +86,7 @@ module Markus
       # the supersyntax for all commands will be: 
       # this-script.rb command-name --opt="x" --opt2="x y" [filename1 [filename2 [...]]] ...    
       def cli_run(argList=nil)
-
+        cli_log(2){"\000"+cli_app_title+" started on "+Time.now.to_s}; 
         # so parse out a string not starting with a dash, zero or more ones starting with a dash, 
         # and zero or more not starting with a dash
         argList ||= ARGV
@@ -107,6 +107,7 @@ module Markus
         #end
 
         __send__(method_name)
+        cli_log(2){"\000"+cli_app_title+" finished on "+Time.now.to_s}        
       end #def cli_run
 
       def cli_validate_opt_or_arg(validationsList, varHash, varName)
@@ -122,7 +123,6 @@ module Markus
       end
       
       def cli_activate_opt_or_arg(action, varHash, varName)
-        ppp "blah"
         case action[:action]
           when :open_file
             @cliFiles[varName] = {
@@ -137,6 +137,10 @@ module Markus
       def cli_validate_file_must_exist(validationData, varHash, varName)
         FileStuff.file_must_exist(varHash[varName])
       end
+      
+      def cli_validate_file_must_not_exist(validationData, varHash, varName)
+        FileStuff.file_must_not_exist(varHash[varName])
+      end      
       
       def cli_validate_regexp(validationData, varHash, varName)
         value = varHash[varName]  
@@ -155,9 +159,14 @@ module Markus
       
       def cli_file name
         if (!@cliFiles[name] || !@cliFiles[name][:fh])
-          raise CliException.new(%{no such file "#{name}" -- #{@cliFiles.inspect}});
+          msg = %{no suchfile #{name.inspect} -- available files are: }+cli_files_inspect
+          raise CliException.new(msg);
         end
         @cliFiles[name][:fh]
+      end
+      
+      def cli_files_inspect
+        @cliFiles.map{|k,v| k.inspect+':'+v[:filename]}.join(',')
       end
       
       protected
@@ -366,8 +375,9 @@ module Markus
           grammar = @cliCommandData[:options][k]
           if grammar.nil?  # get rid of single letter keys for clarity
             givenOpts.delete(k) 
-          elsif grammar[:validations]
-            cli_validate_opt_or_arg(grammar[:validations], givenOpts, k)
+          else
+            cli_validate_opt_or_arg(grammar[:validations], givenOpts, k) if grammar[:validations]
+            cli_activate_opt_or_arg(grammar[:action]    , givenOpts, k) if grammar[:action]
           end
         end
 
@@ -437,24 +447,31 @@ module Markus
         end
       end
 
-      # Notes on log levels: level 0 means output no matter what. Level 1 is output informational stuff
-      # perhaps for the client (not developer) to see. Level 2 and above are informational and for the developer
+      # print the string that results from calling the block iff logLevelInt is less than or equal to
+      # the log level set by passing --debug flags
+
+      # Log levels: level 0 means output no matter what. Level 1 is output informational stuff
+      # perhaps for the client (not developer) to see.  
+      # Level 2 and above are informational and for the developer
       # or user trying to troubleshoot a bug.
       # there is no upper bounds to the debug levels.  but we might restrict it to the range (0..10] (sic) 
       # and use floats instead; one day.
       
+      # if there is no @cliLogLevel set at the time this is called, it probably means that the command-
+      # line processor hasn't been called yet, in which case we output the message no matter what.
+      
+      # if a string starts with the null character (zero, ie "\000") it means "do not indent this line"      
+      # (otherwise, lines will be indented according to their loglevel)
       # if you end a string with the null character (zero, ie \000) it means "no newline afterwards"
-      # if a string starts with the null character (zero, ie "\000") it means "do not indent this line"
-      # print the string that results from calling the block iff logLevelInt is less than or equal to
-      # the log level set by passing --debug flags
       def cli_log(logLevelInt, &printBlock)
-        if logLevelInt <= @cliLogLevel
+        if @cliLogLevel.nil? || logLevelInt <= @cliLogLevel
           str = yield;
           unless(str.instance_of? String)
             STDERR.print "misuse of cli_log() -- block should return string at "+caller[0]+"\n"
             false
           else 
             STDERR.print('  '*[logLevelInt-2,0].max) unless str[0] == 0
+            str = str[1..-1] if (0==str[0])
             STDERR.print str
             STDERR.print("\n") unless str[-1] == 0       
             true
