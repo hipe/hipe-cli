@@ -7,7 +7,15 @@ module Markus
     attr_accessor :name, :ignore_deletions #when reporting on changed keys
     
     def self.is_scalar obj
-      obj.instance_of? String or obj.instance_of? Float or obj.instance_of? Fixnum or obj.instance_of? NilClass 
+      case obj
+        when String: true
+        when Float: true
+        when Fixnum: true
+        when TrueClass: true
+        when FalseClass: true
+        when NilClass: true
+        else false
+      end
     end
     
     def initialize(diff)
@@ -93,7 +101,7 @@ module Markus
         end
         return self.new ret
       else #if chain   
-        raise Exception.new("unhandled case");
+        raise Exception.new(%{unhandled case: "#{obj1.class}" and "#{obj2.class}"});
       end
     end #def
     
