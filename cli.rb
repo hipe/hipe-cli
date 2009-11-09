@@ -105,7 +105,6 @@ module Markus
         #unless cli_log(7){"\n\n_about to request #{method_name} with this grammar:\n"+spp(nil, @cli_command_data);}
         cli_log(4){"\000Running #{method_name}() to implement the command."}
         #end
-
         __send__(method_name)
         cli_log(2){"\000"+cli_app_title+" finished on "+Time.now.to_s}        
       end #def cli_run
@@ -122,16 +121,16 @@ module Markus
         end
       end
       
+      def cli_activate_opt_or_arg_open_file action, var_hash, var_name
+        @cli_files[var_name] = {
+          :fh => File.open(var_hash[var_name], action[:as]),
+          :filename => var_hash[var_name]
+        }      
+      end
+      
       def cli_activate_opt_or_arg(action, var_hash, var_name)
-        case action[:action]
-          when :open_file
-            @cli_files[var_name] = {
-              :fh => File.open(var_hash[var_name], action[:as]),
-              :filename => var_hash[var_name]
-            }
-          else
-            raise CliException.new("can't determine action for "+spp(:action, action))
-          end
+        do_this = 'cli_activate_opt_or_arg_'+action[:action].to_s
+        __send__ do_this, action, var_hash, var_name
       end
       
       def cli_validate_file_must_exist(validation_data, var_hash, var_name)
@@ -149,7 +148,7 @@ module Markus
           raise SyntaxError.new(%{Error with --#{var_name}=#{value}: }+
           validation_data[:message]+' (regexp: '+re.to_s+')')
         end
-        var_hash[var_name] = matches # clobbers original ! 
+        var_hash[var_name] = matches if matches.size > 1 # clobbers original, only when there are captures ! 
       end
 
       # this guy makes string keys and string values!
@@ -185,14 +184,16 @@ module Markus
       end
       
       def describe_command(command_data, opts={})
+        command_label = command_data[:name].to_s
+        command_label.gsub!(/_/,'-') unless opts[:is_arg]
         if (opts[:length] && opts[:length]==:one_line)
           descr = command_data[:description].nil? ? '(no description)' : command_data[:description]
-          s = sprintf('%-28s',switch( command_data[:name] ))+App.truncate(descr,50)
+          s = sprintf('%-28s',command_label)+App.truncate(descr,50)
         else
           parts = []
           args_desc_lines = []
           opts_desc_lines = []
-          parts << "\n_usage: \n #{cli_app_title} #{command_data[:name].to_s}"
+          parts << "\nUsage: \n #{cli_app_title} #{command_label.to_s}"
           
           #cli_populate_global_options(command_data) if (0<@cli_global_options.size)
                     
@@ -202,7 +203,7 @@ module Markus
           if (command_data[:required_arguments])
             command_data[:required_arguments].each do |v|
               parts << v[:name]
-              desc_line = describe_command(v, :length=>:one_line)                
+              desc_line = describe_command(v, :length=>:one_line, :is_arg=>1)                
               if (0<desc_line.length)
                 args_desc_lines << desc_line 
               end
@@ -211,23 +212,16 @@ module Markus
           if (command_data[:optional_arguments])
             last = command_data[:optional_arguments].size - 1
             command_data[:optional_arguments].each_with_index do |v,i|
-              desc_line = describe_command(v, :length=>:one_line)
+              desc_line = describe_command(v, :length=>:one_line, :is_arg=>1)
               args_desc_lines << desc_line if (0<desc_line.length) 
-              s = '['+ switch( v[:name] );
+              s = '['+ v[:name].to_s;
               s << (']'*(i+1)) if (i==last)
               parts << s
             end              
           end
           if (command_data[:options])
             command_data[:options].each do |k,v|
-
-                unless (v.instance_of? Hash)
-                  pp command_data
-                  puts "ls;akfjleskfjesalkfjesak;"
-                  exit
-                end
-                
-              opts_desc_lines << sprintf('--%-26s', switch( k )+'=ARG') + 
+              opts_desc_lines << sprintf('--%-26s', (k.to_s+'=ARG')) + 
               (v[:description] ? v[:description] : '')
             end
           end
@@ -235,8 +229,8 @@ module Markus
           grammar = parts.join(' ');
           sections << command_data[:description] if command_data[:description]
           sections << grammar if (grammar.length > 0)
-          sections << ("\n_arguments:\n  "+ args_desc_lines.join("\n  ")) if args_desc_lines.size > 0
-          sections << ("\n\n_options:\n  "+ opts_desc_lines.join("\n\n  ")) if opts_desc_lines.size > 0
+          sections << ("\nArguments:\n  "+ args_desc_lines.join("\n  ")) if args_desc_lines.size > 0
+          sections << ("\n\nOptions:\n  "+ opts_desc_lines.join("\n\n  ")) if opts_desc_lines.size > 0
           sections << "\n"
           s = sections.join("\n");
         end # else show grammar
@@ -272,7 +266,7 @@ module Markus
         if command_name.nil? 
           print cli_app_title+": "+@cli_description+"\n\n"
           @cli_command_data = nil; 
-          print cli_usage_message                   
+          print cli_usage_message+"\n\n"
         elsif
           command_data.nil?
           print "Sorry, there is no command \"#{command_name}\"\n";
