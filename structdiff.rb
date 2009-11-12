@@ -1,6 +1,11 @@
 require 'rubygems'
 require 'pp'
 
+# Usage: diff = StructDiff::diff(hash1, hash2)
+# 
+#
+#
+
 module Markus
   class StructDiff
     
@@ -33,6 +38,14 @@ module Markus
       @ignore_deletions = false
       @ign = {}
       @filter = {}
+    end
+    
+    def middle_diff
+      @diff[:diff]
+    end
+    
+    def right
+      @diff[:right]
     end
     
     def filter_for(field,hand,&proc)

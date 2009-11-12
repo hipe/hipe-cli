@@ -56,6 +56,11 @@ module Markus
             @cli_commands[m[1].to_sym] = {:name=>m[1].to_sym, :description=>'(user-defined method)'}
           end
         end
+        @cli_commands.each do |k,v|
+          if ([:splat,:optional_arguments] & v.keys).size > 1
+            raise CliException("For now can't have both splat and optional args")
+          end
+        end
       end
             
       def cli_app_title
@@ -184,10 +189,11 @@ module Markus
       end
       
       def describe_command(command_data, opts={})
-        command_label = command_data[:name].to_s
+        cmd = command_data
+        command_label = cmd[:name].to_s
         command_label.gsub!(/_/,'-') unless opts[:is_arg]
         if (opts[:length] && opts[:length]==:one_line)
-          descr = command_data[:description].nil? ? '(no description)' : command_data[:description]
+          descr = cmd[:description].nil? ? '(no description)' : cmd[:description]
           s = sprintf('%-28s',command_label)+App.truncate(descr,50)
         else
           parts = []
@@ -195,13 +201,13 @@ module Markus
           opts_desc_lines = []
           parts << "\nUsage: \n #{cli_app_title} #{command_label.to_s}"
           
-          #cli_populate_global_options(command_data) if (0<@cli_global_options.size)
+          #cli_populate_global_options(cmd) if (0<@cli_global_options.size)
                     
-          if (command_data[:options] && command_data[:options].size > 0)
+          if (cmd[:options] && cmd[:options].size > 0)
             parts << "[OPTIONS]"
           end
-          if (command_data[:required_arguments])
-            command_data[:required_arguments].each do |v|
+          if (cmd[:required_arguments])
+            cmd[:required_arguments].each do |v|
               parts << v[:name]
               desc_line = describe_command(v, :length=>:one_line, :is_arg=>1)                
               if (0<desc_line.length)
@@ -209,25 +215,34 @@ module Markus
               end
             end
           end
-          if (command_data[:optional_arguments])
-            last = command_data[:optional_arguments].size - 1
-            command_data[:optional_arguments].each_with_index do |v,i|
-              desc_line = describe_command(v, :length=>:one_line, :is_arg=>1)
-              args_desc_lines << desc_line if (0<desc_line.length) 
-              s = '['+ v[:name].to_s;
-              s << (']'*(i+1)) if (i==last)
+          which = cmd[:optional_args] ? :optional_args : (cmd[:splat] ? :splat : nil)
+          if (which)
+            if :optional_arguments == which
+              last = cmd[:optional_arguments].size - 1
+              cmd[:optional_arguments].each_with_index do |v,i|
+                desc_line = describe_command(v, :length=>:one_line, :is_arg=>1)
+                args_desc_lines << desc_line if (0<desc_line.length) 
+                s = '['+ v[:name].to_s;
+                s << (']'*(i+1)) if (i==last)
+                parts << s
+              end
+            else
+              s = %{#{cmd[:splat][:name]} [#{cmd[:splat][:name]} [...]]}
+              s = %{[#{s}]} if (cmd[:splat][:min] && cmd[:splat][:min] == 1)
               parts << s
-            end              
+              desc_line = describe_command(cmd[:splat], :length=>:one_line, :is_arg=>1)
+              args_desc_lines << desc_line if (0<desc_line.length)                
+            end
           end
-          if (command_data[:options])
-            command_data[:options].each do |k,v|
+          if (cmd[:options])
+            cmd[:options].each do |k,v|
               opts_desc_lines << sprintf('--%-26s', (k.to_s+'=ARG')) + 
               (v[:description] ? v[:description] : '')
             end
           end
           sections = []
           grammar = parts.join(' ');
-          sections << command_data[:description] if command_data[:description]
+          sections << cmd[:description] if cmd[:description]
           sections << grammar if (grammar.length > 0)
           sections << ("\nArguments:\n  "+ args_desc_lines.join("\n  ")) if args_desc_lines.size > 0
           sections << ("\n\nOptions:\n  "+ opts_desc_lines.join("\n\n  ")) if opts_desc_lines.size > 0
@@ -235,7 +250,7 @@ module Markus
           s = sections.join("\n");
         end # else show grammar
         if (s.nil?) 
-          s = "hwat gives ? "+pp(command_data, opts)
+          s = "hwat gives ? "+pp(cmd, opts)
         end
         return s
       end
@@ -279,36 +294,11 @@ module Markus
         end
       end        
       
-      def parse_arguments(arg_list)
-        named_args = {}
-        dirty_args = []
-        
-        # starting from the end, pick off arguments one by one until you find one that 
-        # starts with a "-" (and assume it is an option)
-        while arg_list.size > 0 && arg_list.last[0].chr != '-' do
-          dirty_args << arg_list.pop
-        end
-        dirty_args.reverse!
-        
-        # shlurp all required arguments, barking if they are missing
-        missing_required = []
-        if ( @cli_command_data[:required_arguments] )
-          @cli_command_data[:required_arguments].each_with_index do |arg, i|
-            if (dirty_args.length == 0) # no more inputted arguments to parse!
-              names = @cli_command_data[:required_arguments][i..-1].map{|x| x[:name].to_s}
-              raise SyntaxError.new("Missing required argument#{names.size>0?'s': ''}: "+names.join(' '));
-            end
-            value = dirty_args.shift
-            named_args[arg[:name]] = value
-            cli_validate_opt_or_arg(arg[:validations], named_args, arg[:name]) if arg[:validations]
-            cli_activate_opt_or_arg(arg[:action]    , named_args, arg[:name]) if arg[:action]
-          end
-        end # if
-
+      
+      def schlurp_optional_arguments(dirty_args, named_args)
         # if we have optional arguments, schlurp them up too
         if @cli_command_data[:optional_arguments] 
           names = []
-          name_toIndex = {}
           last_i = [@cli_command_data[:optional_arguments].size - 1, dirty_args.size - 1].min
           vals = []
           (0..last_i).each do |i|
@@ -324,7 +314,46 @@ module Markus
             )
           end
         end
+      end
+      
+      def schlurp_required_arguments(dirty_args, named_args)
+        # shlurp all required arguments, barking if they are missing
+        if ( @cli_command_data[:required_arguments] )
+          @cli_command_data[:required_arguments].each_with_index do |arg, i|
+            if (dirty_args.length == 0) # no more inputted arguments to parse!
+              names = @cli_command_data[:required_arguments][i..-1].map{|x| x[:name].to_s}
+              raise SyntaxError.new("Missing required argument#{names.size>0?'s': ''}: "+names.join(' '));
+            end
+            value = dirty_args.shift
+            named_args[arg[:name]] = value
+            cli_validate_opt_or_arg(arg[:validations], named_args, arg[:name]) if arg[:validations]
+            cli_activate_opt_or_arg(arg[:action]    , named_args, arg[:name]) if arg[:action]
+          end
+        end # if
+      end
         
+      def schlurp_splat_arguments(dirty_args, named_args)
+        splat =  @cli_command_data[:splat]
+        return unless splat        
+        if splat[:min] && (splat[:min] > dirty_args.count)
+          raise SyntaxError(%{Expecting at least #{splat[:min]} #{splat[:name]}}) # should only ever be 1
+        end
+        named_args[splat[:name]] = dirty_args.clone
+        dirty_args.clear
+      end
+      
+      def parse_arguments(arg_list)
+        named_args = {}
+        dirty_args = []
+        # starting from the end, pick off arguments one by one until you find one that 
+        # starts with a "-" (and assume it is an option)
+        while arg_list.size > 0 && arg_list.last[0].chr != '-' do
+          dirty_args << arg_list.pop
+        end
+        dirty_args.reverse!  # even though we just reversed it, it is in the orig. order
+        schlurp_required_arguments(dirty_args, named_args)
+        schlurp_optional_arguments(dirty_args, named_args)
+        schlurp_splat_arguments(dirty_args, named_args)        
         # if we have any remaining provided arguments, we have a syntax error
         if (0 < dirty_args.length)
           raise SyntaxError.new("Sorry, there were unexpected arguments: \""+dirty_args.join(' ')+"\"",
