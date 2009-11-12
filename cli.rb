@@ -5,15 +5,15 @@ require File.dirname(__FILE__)+'/filestuff'
 
 module Markus
   module Cli 
-    
-    class CliException < Exception; end # for errors related to argument handling. ideally would never be thrown
-      
+   
+  class CliException < Exception; end # for errors related to argument handling. ideally would never be thrown
+     
     class SyntaxError < Exception # soft errors for user to see.  (might change this to throw/catch?)
-      def initialize(msg,opts=nil)
-        super(msg)
-      end
-    end
-    
+     def initialize(msg,opts=nil)
+       super(msg)
+     end
+   end
+   
     module App
       include Getopt    
 
@@ -30,8 +30,8 @@ module Markus
         :debug => {
           :description => 'Type one or more d\'s (e.g. "-ddd" to indicate varying degrees of '+
           'debugging output (put to STDERR).',
-          :getopt_type => Getopt::INCREMENT,
-        },
+          :getopt_type => Getopt::INCREMENT
+        }
       }
 
       def cli_pre_init
@@ -50,12 +50,16 @@ module Markus
       end
       
       def cli_post_init #* this might get replaced by an "add command" type of thing
-        names = []
+
+        # add an entry in the commands structure for each method even if it doesn't have metadata
         self.methods.each do |meth| 
           if ((m = /^cli_execute_(.*)$/.match(meth)) && @cli_commands[m[1].to_sym].nil?)
             @cli_commands[m[1].to_sym] = {:name=>m[1].to_sym, :description=>'(user-defined method)'}
           end
         end
+        
+        # for now validate that splat and options aren't combined even though in theory they could be
+        # (really wierd but imagine:)    app.rb --opt1=a --opt2 REQ1 REQ1 [OPT1 [OPT2 [SPLAT [SPLAT]]]]
         @cli_commands.each do |k,v|
           if ([:splat,:optional_arguments] & v.keys).size > 1
             raise CliException("For now can't have both splat and optional args")
@@ -70,18 +74,22 @@ module Markus
       def cli_usage_message
         s = 'Usage: '
         if (@cli_command_data.nil?)
-          s << cli_app_title() +" COMMAND [OPTIONS] [ARGUMENTS]\n" + 
-          "commands:\n"
+          s << cli_app_title() +" COMMAND [OPTIONS] [ARGUMENTS]\n\n" + 
+          "Commands:"
           ks = @cli_commands.keys.map{|k| k.to_s }.sort
           if (ks.include? 'help')
             ks.delete 'help'
             ks.unshift 'help'
           end
-          ks.each do |key|
-            command_data = @cli_commands[key.to_sym]
-            command_data[:name] = key unless command_data[:name]
-            s << "\n  "+describe_command(command_data, :length=>:one_line)
+          
+          commands_like_arguments = []
+          ks.each do |key_as_str|
+            commands_like_arguments << {
+              :name => key_as_str,
+              :description => @cli_commands[key_as_str.to_sym][:description]
+            }
           end
+          s << "\n"+two_columns(commands_like_arguments,:margin=>'  ').join("\n")
         else
           s << "\n"+describe_command(@cli_command_data)
         end
@@ -107,7 +115,6 @@ module Markus
                 
         method_name = 'cli_execute_'+(@cli_command_data[:name].to_s)
         
-        #unless cli_log(7){"\n\n_about to request #{method_name} with this grammar:\n"+spp(nil, @cli_command_data);}
         cli_log(4){"\000Running #{method_name}() to implement the command."}
         #end
         __send__(method_name)
@@ -125,7 +132,7 @@ module Markus
           __send__(meth_name, val_data, var_hash, var_name)
         end
       end
-      
+     
       def cli_activate_opt_or_arg_open_file action, var_hash, var_name
         @cli_files[var_name] = {
           :fh => File.open(var_hash[var_name], action[:as]),
@@ -188,71 +195,94 @@ module Markus
         end
       end
       
-      def describe_command(command_data, opts={})
+      def el_recurso(list,left,right,use_outermost_brackets=1)
+        if use_outermost_brackets
+          _el_recurso(list,left,right,use_outermost_brackets=1)
+        else
+          list.shift + _el_recurso(list,left,right,use_outermost_brackets=1)
+        end
+      end
+      
+      def _el_recurso(list,left,right,use_outermost_brackets=1)
+        %{#{left}#{list.shift.to_s}#{(list.size > 0 ? el_recurso(list,left,right,true) : '')}#{right}}
+      end
+      
+      def describe_command(command_data, opts={})  
+        opts = {
+          :total_width => 80,
+          :first_col_width => 30,
+          :length => :one_line_,
+          :margin => ''
+        }.merge(opts)
+        right_col_width = opts[:total_width] - opts[:first_col_width]        
         cmd = command_data
         command_label = cmd[:name].to_s
         command_label.gsub!(/_/,'-') unless opts[:is_arg]
-        if (opts[:length] && opts[:length]==:one_line)
+        if :one_line == opts[:length]
           descr = cmd[:description].nil? ? '(no description)' : cmd[:description]
-          s = sprintf('%-28s',command_label)+App.truncate(descr,50)
-        else
-          parts = []
-          args_desc_lines = []
-          opts_desc_lines = []
-          parts << "\nUsage: \n #{cli_app_title} #{command_label.to_s}"
-          
-          #cli_populate_global_options(cmd) if (0<@cli_global_options.size)
-                    
-          if (cmd[:options] && cmd[:options].size > 0)
-            parts << "[OPTIONS]"
-          end
-          if (cmd[:required_arguments])
-            cmd[:required_arguments].each do |v|
-              parts << v[:name]
-              desc_line = describe_command(v, :length=>:one_line, :is_arg=>1)                
-              if (0<desc_line.length)
-                args_desc_lines << desc_line 
-              end
-            end
-          end
-          which = cmd[:optional_args] ? :optional_args : (cmd[:splat] ? :splat : nil)
-          if (which)
-            if :optional_arguments == which
-              last = cmd[:optional_arguments].size - 1
-              cmd[:optional_arguments].each_with_index do |v,i|
-                desc_line = describe_command(v, :length=>:one_line, :is_arg=>1)
-                args_desc_lines << desc_line if (0<desc_line.length) 
-                s = '['+ v[:name].to_s;
-                s << (']'*(i+1)) if (i==last)
-                parts << s
-              end
-            else
-              s = %{#{cmd[:splat][:name]} [#{cmd[:splat][:name]} [...]]}
-              s = %{[#{s}]} if (cmd[:splat][:min] && cmd[:splat][:min] == 1)
-              parts << s
-              desc_line = describe_command(cmd[:splat], :length=>:one_line, :is_arg=>1)
-              args_desc_lines << desc_line if (0<desc_line.length)                
-            end
-          end
-          if (cmd[:options])
-            cmd[:options].each do |k,v|
-              opts_desc_lines << sprintf('--%-26s', (k.to_s+'=ARG')) + 
-              (v[:description] ? v[:description] : '')
-            end
-          end
-          sections = []
-          grammar = parts.join(' ');
-          sections << cmd[:description] if cmd[:description]
-          sections << grammar if (grammar.length > 0)
-          sections << ("\nArguments:\n  "+ args_desc_lines.join("\n  ")) if args_desc_lines.size > 0
-          sections << ("\n\nOptions:\n  "+ opts_desc_lines.join("\n\n  ")) if opts_desc_lines.size > 0
-          sections << "\n"
-          s = sections.join("\n");
-        end # else show grammar
-        if (s.nil?) 
-          s = "hwat gives ? "+pp(cmd, opts)
+          return sprintf(%{#{opts[:margin]}%-#{opts[:first_col_width]}s},command_label)+
+           App.truncate(descr,right_col_width)
+        end      
+        usage_parts = []; args_desc_lines = [];
+        usage_parts << "\nUsage: \n #{cli_app_title} #{command_label.to_s}"
+        usage_parts << "[OPTIONS]" if cmd[:options] && cmd[:options].size > 0
+        if cmd[:required_arguments]
+          cmd[:required_arguments].each { |arg| usage_parts << arg[:name] } # no special formatting for required
+          args_desc_lines += two_columns(cmd[:required_arguments], opts)
         end
-        return s
+        if cmd[:optional_arguments]
+          usage_parts << el_recurso( cmd[:optional_arguments].map { |x| x[:name] } , '[', ']' )
+          args_desc_lines += two_columns(cms[:optional_arguments], opts.merge({:length=>0}))
+        end
+        if cmd[:splat]
+          usage_parts << el_recurso( Array.new(2,cmd[:splat][:name]) + ['...'], '[', ']', !(cmd[:splat][:min]==1))
+          desc_line = describe_command(cmd[:splat], :length=>:one_line, :is_arg=>1)
+          args_desc_lines << desc_line if (0<desc_line.length)                
+        end
+        if cmd[:options]
+          opts_desc_lines = two_columns(cmd[:options],opts.merge({:length=>0}))
+        else 
+          opts_desc_lines = []
+        end
+          # first_col_width = opts[:first_col_width] - 2
+          # cmd[:options].each do |k,v|
+          #   opts_desc_lines << sprintf(%{%-#{first_col_width}s}, (k.to_s+'=ARG')) + 
+          #   (v[:description] ? v[:description] : '')
+          # end
+        sections = []
+        grammar = usage_parts.join(' ');
+        sections << cmd[:description] if cmd[:description]
+        sections << grammar if (grammar.length > 0)
+        sections << ("\nArguments:\n  "+ args_desc_lines.join("\n  ")) if args_desc_lines.size > 0
+        sections << ("\nOptions:\n  "+ opts_desc_lines.join("\n  ")) if opts_desc_lines.size > 0
+        sections << "\n"
+        sections.join("\n");
+      end
+      
+      def two_columns(args,opts={})
+        opts = {
+          :margin => ''
+        }.merge(opts)
+        ret = []
+        max = 0
+        if (args.instance_of? Hash)
+          args = args.map{ |k,v| {:name=>k.to_s, :description=>v[:description]}}
+        end
+        args.each do |v|
+          max = [max,v[:name].to_s.length].max
+        end
+        optos = {
+         :length=>:one_line, 
+         :is_arg=>1, 
+         :first_col_width=>max+5, 
+        }.merge(opts)
+        args.each do |v|
+          desc_line = describe_command(v, optos)
+          if (0<desc_line.length)
+            ret << desc_line 
+          end
+        end
+        ret
       end
       
       def cli_populate_global_options(command_data)
@@ -266,14 +296,14 @@ module Markus
         dirty_command = arg_list.shift
         as_sym = switch( dirty_command )
         if @cli_commands[as_sym].nil?
-            raise SyntaxError.new("Sorry, \"#{dirty_command}\" is not a valid command.");
+          raise SyntaxError.new("Sorry, \"#{dirty_command}\" is not a valid command.");
         else
           command_data = @cli_commands[as_sym].clone
         end
         command_data[:name] = as_sym if command_data[:name].nil?  # not sure when we would indicate a :name if ever
         return command_data
       end
-        
+      
       def cli_execute_help
         command_name = @cli_arguments[:COMMAND_NAME] 
         command_sym = switch( command_name )
@@ -281,7 +311,8 @@ module Markus
         if command_name.nil? 
           print cli_app_title+": "+@cli_description+"\n\n"
           @cli_command_data = nil; 
-          print cli_usage_message+"\n\n"
+          print  %{For help on a specific command, try \n  #{cli_app_title} help COMMAND\n\n}+
+            %{#{cli_usage_message}\n\n}
         elsif
           command_data.nil?
           print "Sorry, there is no command \"#{command_name}\"\n";
@@ -292,9 +323,7 @@ module Markus
           command_data[:name] = command_sym
           puts describe_command command_data
         end
-      end        
-      
-      
+      end      
       def schlurp_optional_arguments(dirty_args, named_args)
         # if we have optional arguments, schlurp them up too
         if @cli_command_data[:optional_arguments] 
@@ -365,7 +394,6 @@ module Markus
       end
             
       def parse_options arg_list
-        cli_populate_global_options @cli_command_data        
         if @cli_command_data[:options].nil?
           cli_log(2){"NOTICE: skipping the parsing of options because none are present in the grammar!"}
           return
@@ -488,22 +516,22 @@ module Markus
       # (otherwise, lines will be indented according to their loglevel)
       # if you end a string with the null character (zero, ie \000) it means "no newline afterwards"
       def cli_log(log_levelInt, &print_block)
-        if !@cli_log_level.nil? && log_levelInt <= @cli_log_level
-          str = yield;
-          unless(str.instance_of? String)
-            STDERR.print "misuse of cli_log() -- block should return string at "+caller[0]+"\n"
-            false
-          else 
-            STDERR.print('  '*[log_levelInt-2,0].max) unless str[0] == 0
-            str = str[1..-1] if (0==str[0])
-            STDERR.print str
-            STDERR.print("\n") unless str[-1] == 0       
-            true
-          end
-        else
-          false
-        end
-      end
+       if !@cli_log_level.nil? && log_levelInt <= @cli_log_level
+         str = yield;
+         unless(str.instance_of? String)
+           STDERR.print "misuse of cli_log() -- block should return string at "+caller[0]+"\n"
+           false
+         else 
+           STDERR.print('  '*[log_levelInt-2,0].max) unless str[0] == 0
+           str = str[1..-1] if (0==str[0])
+           STDERR.print str
+           STDERR.print("\n") unless str[-1] == 0       
+           true
+         end
+       else
+         false
+       end
+     end
       
       def switch(sym_or_string)
         if sym_or_string.kind_of? Symbol
@@ -514,6 +542,7 @@ module Markus
           sym_or_string
         end
       end
+
     end #module App
   end #module Cli
 end #module Markus
