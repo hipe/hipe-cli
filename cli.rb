@@ -38,6 +38,8 @@ module Markus
         # the below hold the entire "grammar" and help documentation for the interface of your cli app
         @cli_commands = {}
         @cli_global_options = {}
+        @cli_column_padding = 4
+        @cli_screen_width = 80
         
         # the below are the result of parsing the user's input
         @cli_command = nil
@@ -78,7 +80,8 @@ module Markus
       end
       
       def cli_usage_message
-        s = 'Usage: '
+        opts = {:margin=>'  ',:total_width=>@cli_screen_width,:padding=>@cli_column_padding}
+        s = ''; #s = 'Usage: '
         if (@cli_command_data.nil?)
           s << cli_app_title() +" COMMAND [OPTIONS] [ARGUMENTS]\n\n" + 
           "Commands:"
@@ -95,9 +98,9 @@ module Markus
               :description => @cli_commands[key_as_str.to_sym][:description]
             }
           end
-          s << "\n"+two_columns(commands_like_arguments,:margin=>'  ').join("\n")
+          s << "\n"+describe_multiline_two_columns(commands_like_arguments,opts)
         else
-          s << "\n"+describe_command(@cli_command_data)
+          s << "\n"+describe_command_multiline(@cli_command_data,opts)
         end
         s
       end
@@ -217,82 +220,86 @@ module Markus
         %{#{left}#{list.shift.to_s}#{(list.size > 0 ? (' '+el_recurso(list,left,right,true)) : '')}#{right}}
       end
       
-      def describe_command(command_data, opts={})  
+      def describe_monoline_two_columns(first, second, first_width, second_width, margin)
+        sprintf(%{%-#{first_width}s},margin+App.truncate(first,first_width - margin.length)) + 
+        sprintf(%{%-s},App.truncate(second,second_width))
+      end
+
+      def word_wrap(text, line_width) # thanks rails
+        #ret = text.gsub(/\n/, "\n\n").gsub(/(.{1,#{line_width}})(\s+|$)/, "\\1\n").strip 1.2.6
+        # the above looses leading spaces etc.  below is from 2.2.2
+        ret = text.split("\n").collect do |line|
+          line.length > line_width ? line.gsub(/(.{1,#{line_width}})(\s+|$)/, "\\1\n").strip : line
+        end * "\n"        
+        ret
+      end
+
+      def n_columns(columns)
+        columns.each do |column|
+          column[:lines ] =  word_wrap(column[:content], column[:width]).split("\n")
+          column.delete(:content)
+        end
+
+        max_lines = (columns.inject{|memo,this| memo[:lines].length < this[:lines].length ? this : memo })[:lines].length
+        
+        lines = [*0..(max_lines-1)].map do |i|
+          columns.map do |column|
+            sprintf(%{%-#{column[:width]}s}, column[:lines][i])
+          end * ''
+        end
+
+        ret = lines * "\n"
+      end
+
+      def describe_command_multiline(cmd, opts={})  
         opts = {
-          :total_width => 80,
-          :first_col_width => 30,
-          :length => :one_line_,
-          :margin => ''
+          :total_width => @cli_screen_width,
+          :margin      => ''
         }.merge(opts)
-        right_col_width = opts[:total_width] - opts[:first_col_width]        
-        cmd = command_data
-        command_label = cmd[:name].to_s
-        command_label.gsub!(/_/,'-') unless opts[:is_arg]
-        if :one_line == opts[:length]
-          descr = cmd[:description].nil? ? '(no description)' : cmd[:description]
-          return sprintf(%{#{opts[:margin]}%-#{opts[:first_col_width]}s},command_label)+
-           App.truncate(descr,right_col_width)
-        end      
-        usage_parts = []; args_desc_lines = [];
-        usage_parts << "\nUsage: \n #{cli_app_title} #{command_label.to_s}"
-        usage_parts << "[OPTIONS]" if cmd[:options] && cmd[:options].size > 0
-        if cmd[:required_arguments]
-          cmd[:required_arguments].each { |arg| usage_parts << arg[:name] } # no special formatting for required
-          args_desc_lines += two_columns(cmd[:required_arguments], opts)
+        lines = []
+        command_label = cmd[:name].to_s.gsub(/_/,'-')
+        usage_line_parts = ["Usage: #{cli_app_title} #{command_label}"]
+        usage_line_parts << "[OPTIONS]" if cmd[:options] && cmd[:options].size > 0
+        usage_line_parts += cmd[:required_arguments].map{|x| x[:name].to_s } if cmd[:required_arguments]
+        usage_line_parts << el_recurso(cmd[:optional_arguments].map{|x|x[:name]},'[',']') if cmd[:optional_arguments]
+        usage_line_parts << el_recurso(Array.new(2,cmd[:splat][:name])+['...'],'[',']',!(cmd[:splat][:minimum]==1)) if 
+          cmd[:splat]
+        opts2 = opts.merge(:margin=>'  ', :padding => @cli_column_padding)
+        # this is crazy: changing the original data structure, put the splat either on the required arguments or the 
+        # optional arguments, depending on if it is minimum 1 or not
+        if (cmd[:splat]) 
+          which = (cmd[:splat][:minimum] && cmd[:splat][:minimum] >= 1) ? :required_arguments : :optional_arguments
+          cmd[which] ||= []; cmd[which] << cmd[:splat]
         end
-        if cmd[:optional_arguments]
-          usage_parts << el_recurso( cmd[:optional_arguments].map { |x| x[:name] } , '[', ']' )
-          args_desc_lines += two_columns(cms[:optional_arguments], opts.merge({:length=>0}))
-        end
-        if cmd[:splat]
-          usage_parts << el_recurso( Array.new(2,cmd[:splat][:name]) + ['...'], '[', ']', !(cmd[:splat][:minimum]==1))
-          desc_line = describe_command(cmd[:splat], :length=>:one_line, :is_arg=>1)
-          args_desc_lines << desc_line if (0<desc_line.length)                
-        end
-        if cmd[:options]
-          opts_desc_lines = two_columns(cmd[:options],opts.merge({:length=>0}))
-        else 
-          opts_desc_lines = []
-        end
-          # first_col_width = opts[:first_col_width] - 2
-          # cmd[:options].each do |k,v|
-          #   opts_desc_lines << sprintf(%{%-#{first_col_width}s}, (k.to_s+'=ARG')) + 
-          #   (v[:description] ? v[:description] : '')
-          # end
-        sections = []
-        grammar = usage_parts.join(' ');
-        sections << cmd[:description] if cmd[:description]
-        sections << grammar if (grammar.length > 0)
-        sections << ("\nArguments:\n  "+ args_desc_lines.join("\n  ")) if args_desc_lines.size > 0
-        sections << ("\nOptions:\n  "+ opts_desc_lines.join("\n  ")) if opts_desc_lines.size > 0
-        sections << "\n"
-        sections.join("\n");
+        [ usage_line_parts * ' ',
+          #(!cmd[:splat]) ? nil : describe_multiline_two_columns([cmd[:splat]], opts2.merge(:title=>"\n")),
+          describe_multiline_two_columns(cmd[:required_arguments], opts2.merge(:title=>"\nRequired Arguments:\n")),
+          describe_multiline_two_columns(cmd[:optional_arguments], opts2.merge(:title=>"\nOptional Arguments:\n")),
+          describe_multiline_two_columns(cmd[:options], opts2.merge(:title=>"\nOptions:\n")),          
+        ].compact * "\n"
       end
       
-      def two_columns(args,opts={})
-        opts = {
-          :margin => ''
-        }.merge(opts)
-        ret = []
+      def describe_multiline_two_columns(args,opts)
+        opts = {:title=>''}.merge(opts)
+        return nil if args.nil?  # keep this here!
         if (args.instance_of?(Hash))
-          args = args.map{ |k,v| {:name=>k.to_s, :description=>v[:description]}}
+          args = args.map{ |k,v| {:name=>k.to_s.gsub('_','-'), :description=>v[:description]}}.sort{|a,b| a[:name]<=>b[:name]}
         end
-        max = 0        
-        args.each do |v|
-          max = [max,v[:name].to_s.length].max
+        opts2 = {}
+        opts2[:max] = (args.inject{ |longest,this| longest[:name].to_s.length > this[:name].to_s.length ? longest : this })[:name].to_s.length
+        opts2[:max] += opts[:margin].length
+        opts2[:first_column_width] = [opts2[:max], (opts[:total_width] / 2).floor].min + opts[:padding]
+        opts2[:second_column_width] = ( opts[:total_width] - opts2[:first_column_width] )
+        opts2.delete(:max)
+
+        ret = args.map do |arg|
+          desc = arg[:description] ? arg[:description] : '(no description)'          
+          cols = [ { :content => opts[:margin]+(arg[:name].to_s), :width => opts2[:first_column_width ] }, 
+            { :content => desc, :width => opts2[:second_column_width ] }
+          ]
+          n_columns(cols)
         end
-        optos = {
-         :length=>:one_line, 
-         :is_arg=>1, 
-         :first_col_width=>max+5, 
-        }.merge(opts)
-        args.each do |v|
-          desc_line = describe_command(v, optos)
-          if (0<desc_line.length)
-            ret << desc_line 
-          end
-        end
-        ret
+        opts[:title] + (ret * "\n")
       end
       
       def cli_populate_global_options(command_data)
@@ -321,8 +328,8 @@ module Markus
         if command_name.nil? 
           print cli_app_title+": "+@cli_description+"\n\n"
           @cli_command_data = nil; 
-          print  %{For help on a specific command, try \n  #{cli_app_title} help COMMAND\n\n}+
-            %{#{cli_usage_message}\n\n}
+          print  %{For help on a specific command, try:\n  #{cli_app_title} help COMMAND\n\n}+
+            %{Usage: #{cli_usage_message}\n\n}
         elsif
           command_data.nil?
           print "Sorry, there is no command \"#{command_name}\"\n";
@@ -331,9 +338,10 @@ module Markus
         else
           puts @cli_arguments[:COMMAND_NAME]+":"
           command_data[:name] = command_sym
-          puts describe_command command_data
+          puts describe_command_multiline command_data
         end
-      end      
+      end
+      
       def schlurp_optional_arguments(dirty_args, named_args)
         # if we have optional arguments, schlurp them up too
         if @cli_command_data[:optional_arguments] 
