@@ -5,15 +5,15 @@ require File.dirname(__FILE__)+'/filestuff'
 
 module Markus
   module Cli 
-    
-    class CliException < Exception; end # for errors related to argument handling. ideally would never be thrown
-      
+   
+  class CliException < Exception; end # for errors related to argument handling. ideally would never be thrown
+     
     class SyntaxError < Exception # soft errors for user to see.  (might change this to throw/catch?)
-      def initialize(msg,opts=nil)
-        super(msg)
-      end
-    end
-    
+     def initialize(msg,opts=nil)
+       super(msg)
+     end
+   end
+   
     module App
       include Getopt    
 
@@ -30,14 +30,16 @@ module Markus
         :debug => {
           :description => 'Type one or more d\'s (e.g. "-ddd" to indicate varying degrees of '+
           'debugging output (put to STDERR).',
-          :getopt_type => Getopt::INCREMENT,
-        },
+          :getopt_type => Getopt::INCREMENT
+        }
       }
 
       def cli_pre_init
         # the below hold the entire "grammar" and help documentation for the interface of your cli app
         @cli_commands = {}
         @cli_global_options = {}
+        @cli_column_padding = 4
+        @cli_screen_width = 80
         
         # the below are the result of parsing the user's input
         @cli_command = nil
@@ -50,10 +52,25 @@ module Markus
       end
       
       def cli_post_init #* this might get replaced by an "add command" type of thing
-        names = []
+
+        if (0 < @cli_global_options.size)
+          @cli_commands.each do |name,command|
+            cli_populate_global_options command
+          end
+        end
+        
+        # add an entry in the commands structure for each method even if it doesn't have metadata
         self.methods.each do |meth| 
           if ((m = /^cli_execute_(.*)$/.match(meth)) && @cli_commands[m[1].to_sym].nil?)
             @cli_commands[m[1].to_sym] = {:name=>m[1].to_sym, :description=>'(user-defined method)'}
+          end
+        end
+        
+        # for now validate that splat and options aren't combined even though in theory they could be
+        # (really wierd but imagine:)    app.rb --opt1=a --opt2 REQ1 REQ1 [OPT1 [OPT2 [SPLAT [SPLAT]]]]
+        @cli_commands.each do |k,v|
+          if ([:splat,:optional_arguments] & v.keys).size > 1
+            raise CliException("For now can't have both splat and optional args")
           end
         end
       end
@@ -63,22 +80,27 @@ module Markus
       end
       
       def cli_usage_message
-        s = 'Usage: '
+        opts = {:margin=>'  ',:total_width=>@cli_screen_width,:padding=>@cli_column_padding}
+        s = ''; #s = 'Usage: '
         if (@cli_command_data.nil?)
-          s << cli_app_title() +" COMMAND [OPTIONS] [ARGUMENTS]\n" + 
-          "commands:\n"
+          s << cli_app_title() +" COMMAND [OPTIONS] [ARGUMENTS]\n\n" + 
+          "Commands:"
           ks = @cli_commands.keys.map{|k| k.to_s }.sort
           if (ks.include? 'help')
             ks.delete 'help'
             ks.unshift 'help'
           end
-          ks.each do |key|
-            command_data = @cli_commands[key.to_sym]
-            command_data[:name] = key unless command_data[:name]
-            s << "\n  "+describe_command(command_data, :length=>:one_line)
+          
+          commands_like_arguments = []
+          ks.each do |key_as_str|
+            commands_like_arguments << {
+              :name => key_as_str,
+              :description => @cli_commands[key_as_str.to_sym][:description]
+            }
           end
+          s << "\n"+describe_multiline_two_columns(commands_like_arguments,opts)
         else
-          s << "\n"+describe_command(@cli_command_data)
+          s << "\n"+describe_command_multiline(@cli_command_data,opts)
         end
         s
       end
@@ -102,10 +124,8 @@ module Markus
                 
         method_name = 'cli_execute_'+(@cli_command_data[:name].to_s)
         
-        #unless cli_log(7){"\n\n_about to request #{method_name} with this grammar:\n"+spp(nil, @cli_command_data);}
         cli_log(4){"\000Running #{method_name}() to implement the command."}
         #end
-
         __send__(method_name)
         cli_log(2){"\000"+cli_app_title+" finished on "+Time.now.to_s}        
       end #def cli_run
@@ -121,17 +141,21 @@ module Markus
           __send__(meth_name, val_data, var_hash, var_name)
         end
       end
+     
+      def cli_activate_opt_or_arg_open_file action, var_hash, var_name
+        @cli_files[var_name] = {
+          :fh => File.open(var_hash[var_name], action[:as]),
+          :filename => var_hash[var_name]
+        }      
+      end
       
-      def cli_activate_opt_or_arg(action, var_hash, var_name)
-        case action[:action]
-          when :open_file
-            @cli_files[var_name] = {
-              :fh => File.open(var_hash[var_name], action[:as]),
-              :filename => var_hash[var_name]
-            }
-          else
-            raise CliException.new("can't determine action for "+spp(:action, action))
-          end
+      def cli_activate_opt_or_arg action, var_hash, var_name
+        if (action.instance_of? Proc)
+          var_hash[var_name] = action.call(var_hash[var_name])
+        else
+          do_this = 'cli_activate_opt_or_arg_'+action[:action].to_s
+          __send__ do_this, action, var_hash, var_name
+        end
       end
       
       def cli_validate_file_must_exist(validation_data, var_hash, var_name)
@@ -146,10 +170,10 @@ module Markus
         value = var_hash[var_name]  
         re = validation_data[:regexp]
         if (! matches = (re.match(value))) 
-          raise SyntaxError.new(%{Error with --#{var_name}=#{value}: }+
-          validation_data[:message]+' (regexp: '+re.to_s+')')
+          msg = validation_data[:message] || "failed to match against regular expression #{re}"
+          raise SyntaxError.new(%{Error with --#{var_name}="#{value}": #{msg}})
         end
-        var_hash[var_name] = matches # clobbers original ! 
+        var_hash[var_name] = matches if matches.size > 1 # clobbers original, only when there are captures ! 
       end
 
       # this guy makes string keys and string values!
@@ -184,66 +208,98 @@ module Markus
         end
       end
       
-      def describe_command(command_data, opts={})
-        if (opts[:length] && opts[:length]==:one_line)
-          descr = command_data[:description].nil? ? '(no description)' : command_data[:description]
-          s = sprintf('%-28s',switch( command_data[:name] ))+App.truncate(descr,50)
+      def el_recurso(list,left,right,use_outermost_brackets=1)
+        if use_outermost_brackets
+          _el_recurso(list,left,right,use_outermost_brackets=1)
         else
-          parts = []
-          args_desc_lines = []
-          opts_desc_lines = []
-          parts << "\n_usage: \n #{cli_app_title} #{command_data[:name].to_s}"
-          
-          #cli_populate_global_options(command_data) if (0<@cli_global_options.size)
-                    
-          if (command_data[:options] && command_data[:options].size > 0)
-            parts << "[OPTIONS]"
-          end
-          if (command_data[:required_arguments])
-            command_data[:required_arguments].each do |v|
-              parts << v[:name]
-              desc_line = describe_command(v, :length=>:one_line)                
-              if (0<desc_line.length)
-                args_desc_lines << desc_line 
-              end
-            end
-          end
-          if (command_data[:optional_arguments])
-            last = command_data[:optional_arguments].size - 1
-            command_data[:optional_arguments].each_with_index do |v,i|
-              desc_line = describe_command(v, :length=>:one_line)
-              args_desc_lines << desc_line if (0<desc_line.length) 
-              s = '['+ switch( v[:name] );
-              s << (']'*(i+1)) if (i==last)
-              parts << s
-            end              
-          end
-          if (command_data[:options])
-            command_data[:options].each do |k,v|
-
-                unless (v.instance_of? Hash)
-                  pp command_data
-                  puts "ls;akfjleskfjesalkfjesak;"
-                  exit
-                end
-                
-              opts_desc_lines << sprintf('--%-26s', switch( k )+'=ARG') + 
-              (v[:description] ? v[:description] : '')
-            end
-          end
-          sections = []
-          grammar = parts.join(' ');
-          sections << command_data[:description] if command_data[:description]
-          sections << grammar if (grammar.length > 0)
-          sections << ("\n_arguments:\n  "+ args_desc_lines.join("\n  ")) if args_desc_lines.size > 0
-          sections << ("\n\n_options:\n  "+ opts_desc_lines.join("\n\n  ")) if opts_desc_lines.size > 0
-          sections << "\n"
-          s = sections.join("\n");
-        end # else show grammar
-        if (s.nil?) 
-          s = "hwat gives ? "+pp(command_data, opts)
+          list.shift.to_s + ' ' + _el_recurso(list,left,right,use_outermost_brackets=1)
         end
-        return s
+      end
+      
+      def _el_recurso(list,left,right,use_outermost_brackets=1)
+        %{#{left}#{list.shift.to_s}#{(list.size > 0 ? (' '+el_recurso(list,left,right,true)) : '')}#{right}}
+      end
+      
+      def describe_monoline_two_columns(first, second, first_width, second_width, margin)
+        sprintf(%{%-#{first_width}s},margin+App.truncate(first,first_width - margin.length)) + 
+        sprintf(%{%-s},App.truncate(second,second_width))
+      end
+
+      def word_wrap(text, line_width) # thanks rails
+        #ret = text.gsub(/\n/, "\n\n").gsub(/(.{1,#{line_width}})(\s+|$)/, "\\1\n").strip 1.2.6
+        # the above looses leading spaces etc.  below is from 2.2.2
+        ret = text.split("\n").collect do |line|
+          line.length > line_width ? line.gsub(/(.{1,#{line_width}})(\s+|$)/, "\\1\n").strip : line
+        end * "\n"        
+        ret
+      end
+
+      def n_columns(columns)
+        columns.each do |column|
+          column[:lines ] =  word_wrap(column[:content], column[:width]).split("\n")
+          column.delete(:content)
+        end
+
+        max_lines = (columns.inject{|memo,this| memo[:lines].length < this[:lines].length ? this : memo })[:lines].length
+        
+        lines = [*0..(max_lines-1)].map do |i|
+          columns.map do |column|
+            sprintf(%{%-#{column[:width]}s}, column[:lines][i])
+          end * ''
+        end
+
+        ret = lines * "\n"
+      end
+
+      def describe_command_multiline(cmd, opts={})  
+        opts = {
+          :total_width => @cli_screen_width,
+          :margin      => ''
+        }.merge(opts)
+        lines = []
+        command_label = cmd[:name].to_s.gsub(/_/,'-')
+        usage_line_parts = ["Usage: #{cli_app_title} #{command_label}"]
+        usage_line_parts << "[OPTIONS]" if cmd[:options] && cmd[:options].size > 0
+        usage_line_parts += cmd[:required_arguments].map{|x| x[:name].to_s } if cmd[:required_arguments]
+        usage_line_parts << el_recurso(cmd[:optional_arguments].map{|x|x[:name]},'[',']') if cmd[:optional_arguments]
+        usage_line_parts << el_recurso(Array.new(2,cmd[:splat][:name])+['...'],'[',']',!(cmd[:splat][:minimum]==1)) if 
+          cmd[:splat]
+        opts2 = opts.merge(:margin=>'  ', :padding => @cli_column_padding)
+        # this is crazy: changing the original data structure, put the splat either on the required arguments or the 
+        # optional arguments, depending on if it is minimum 1 or not
+        if (cmd[:splat]) 
+          which = (cmd[:splat][:minimum] && cmd[:splat][:minimum] >= 1) ? :required_arguments : :optional_arguments
+          cmd[which] ||= []; cmd[which] << cmd[:splat]
+        end
+        [ usage_line_parts * ' ',
+          #(!cmd[:splat]) ? nil : describe_multiline_two_columns([cmd[:splat]], opts2.merge(:title=>"\n")),
+          describe_multiline_two_columns(cmd[:required_arguments], opts2.merge(:title=>"\nRequired Arguments:\n")),
+          describe_multiline_two_columns(cmd[:optional_arguments], opts2.merge(:title=>"\nOptional Arguments:\n")),
+          describe_multiline_two_columns(cmd[:options], opts2.merge(:title=>"\nOptions:\n")),          
+        ].compact * "\n"
+      end
+      
+      def describe_multiline_two_columns(args,opts)
+        opts = {:title=>''}.merge(opts)
+        return nil if args.nil?  # keep this here!
+        if (args.instance_of?(Hash))
+          args = args.map{ |k,v| {:name=>k.to_s.gsub('_','-'), :description=>v[:description]}}.sort{|a,b| a[:name]<=>b[:name]}
+        end
+        opts2 = {}
+        opts2[:max] = (args.inject{ |longest,this| longest[:name].to_s.length > this[:name].to_s.length ? longest : this })[:name].to_s.length
+        opts2[:max] += opts[:margin].length
+        opts2[:first_column_width] = [opts2[:max], (opts[:total_width] / 2).floor].min + opts[:padding]
+        opts2[:second_column_width] = ( opts[:total_width] - opts2[:first_column_width] )
+        opts2.delete(:max)
+
+        ret = args.map do |arg|
+          desc = arg[:description] ? arg[:description] : '(no description)'          
+          cols = [ { :content => opts[:margin]+(arg[:name].to_s), :width => opts2[:first_column_width ] }, 
+            { :content => desc, :width => opts2[:second_column_width ] }
+          ]
+          n_columns(cols)
+        end
+        opts[:title] + (ret * "\n")
       end
       
       def cli_populate_global_options(command_data)
@@ -257,14 +313,14 @@ module Markus
         dirty_command = arg_list.shift
         as_sym = switch( dirty_command )
         if @cli_commands[as_sym].nil?
-            raise SyntaxError.new("Sorry, \"#{dirty_command}\" is not a valid command.");
+          raise SyntaxError.new("Sorry, \"#{dirty_command}\" is not a valid command.");
         else
           command_data = @cli_commands[as_sym].clone
         end
         command_data[:name] = as_sym if command_data[:name].nil?  # not sure when we would indicate a :name if ever
         return command_data
       end
-        
+      
       def cli_execute_help
         command_name = @cli_arguments[:COMMAND_NAME] 
         command_sym = switch( command_name )
@@ -272,7 +328,8 @@ module Markus
         if command_name.nil? 
           print cli_app_title+": "+@cli_description+"\n\n"
           @cli_command_data = nil; 
-          print cli_usage_message                   
+          print  %{For help on a specific command, try:\n  #{cli_app_title} help COMMAND\n\n}+
+            %{Usage: #{cli_usage_message}\n\n}
         elsif
           command_data.nil?
           print "Sorry, there is no command \"#{command_name}\"\n";
@@ -281,40 +338,14 @@ module Markus
         else
           puts @cli_arguments[:COMMAND_NAME]+":"
           command_data[:name] = command_sym
-          puts describe_command command_data
+          puts describe_command_multiline command_data
         end
-      end        
+      end
       
-      def parse_arguments(arg_list)
-        named_args = {}
-        dirty_args = []
-        
-        # starting from the end, pick off arguments one by one until you find one that 
-        # starts with a "-" (and assume it is an option)
-        while arg_list.size > 0 && arg_list.last[0].chr != '-' do
-          dirty_args << arg_list.pop
-        end
-        dirty_args.reverse!
-        
-        # shlurp all required arguments, barking if they are missing
-        missing_required = []
-        if ( @cli_command_data[:required_arguments] )
-          @cli_command_data[:required_arguments].each_with_index do |arg, i|
-            if (dirty_args.length == 0) # no more inputted arguments to parse!
-              names = @cli_command_data[:required_arguments][i..-1].map{|x| x[:name].to_s}
-              raise SyntaxError.new("Missing required argument#{names.size>0?'s': ''}: "+names.join(' '));
-            end
-            value = dirty_args.shift
-            named_args[arg[:name]] = value
-            cli_validate_opt_or_arg(arg[:validations], named_args, arg[:name]) if arg[:validations]
-            cli_activate_opt_or_arg(arg[:action]    , named_args, arg[:name]) if arg[:action]
-          end
-        end # if
-
+      def schlurp_optional_arguments(dirty_args, named_args)
         # if we have optional arguments, schlurp them up too
         if @cli_command_data[:optional_arguments] 
           names = []
-          name_toIndex = {}
           last_i = [@cli_command_data[:optional_arguments].size - 1, dirty_args.size - 1].min
           vals = []
           (0..last_i).each do |i|
@@ -330,7 +361,46 @@ module Markus
             )
           end
         end
+      end
+      
+      def schlurp_required_arguments(dirty_args, named_args)
+        # shlurp all required arguments, barking if they are missing
+        if ( @cli_command_data[:required_arguments] )
+          @cli_command_data[:required_arguments].each_with_index do |arg, i|
+            if (dirty_args.length == 0) # no more inputted arguments to parse!
+              names = @cli_command_data[:required_arguments][i..-1].map{|x| x[:name].to_s}
+              raise SyntaxError.new("Missing required argument#{names.size>0?'s': ''}: "+names.join(' '));
+            end
+            value = dirty_args.shift
+            named_args[arg[:name]] = value
+            cli_validate_opt_or_arg(arg[:validations], named_args, arg[:name]) if arg[:validations]
+            cli_activate_opt_or_arg(arg[:action]    , named_args, arg[:name]) if arg[:action]
+          end
+        end # if
+      end
         
+      def schlurp_splat_arguments(dirty_args, named_args)
+        splat =  @cli_command_data[:splat]
+        return unless splat        
+        if splat[:minimum] && (splat[:minimum] > dirty_args.count)
+          raise SyntaxError.new(%{Expecting at least #{splat[:minimum]} #{splat[:name]}}) # should only ever be 1
+        end
+        named_args[splat[:name]] = dirty_args.clone
+        dirty_args.clear
+      end
+      
+      def parse_arguments(arg_list)
+        named_args = {}
+        dirty_args = []
+        # starting from the end, pick off arguments one by one until you find one that 
+        # starts with a "-" (and assume it is an option)
+        while arg_list.size > 0 && arg_list.last[0].chr != '-' do
+          dirty_args << arg_list.pop
+        end
+        dirty_args.reverse!  # even though we just reversed it, it is in the orig. order
+        schlurp_required_arguments(dirty_args, named_args)
+        schlurp_optional_arguments(dirty_args, named_args)
+        schlurp_splat_arguments(dirty_args, named_args)        
         # if we have any remaining provided arguments, we have a syntax error
         if (0 < dirty_args.length)
           raise SyntaxError.new("Sorry, there were unexpected arguments: \""+dirty_args.join(' ')+"\"",
@@ -342,7 +412,6 @@ module Markus
       end
             
       def parse_options arg_list
-        cli_populate_global_options @cli_command_data        
         if @cli_command_data[:options].nil?
           cli_log(2){"NOTICE: skipping the parsing of options because none are present in the grammar!"}
           return
@@ -465,22 +534,22 @@ module Markus
       # (otherwise, lines will be indented according to their loglevel)
       # if you end a string with the null character (zero, ie \000) it means "no newline afterwards"
       def cli_log(log_levelInt, &print_block)
-        if !@cli_log_level.nil? && log_levelInt <= @cli_log_level
-          str = yield;
-          unless(str.instance_of? String)
-            STDERR.print "misuse of cli_log() -- block should return string at "+caller[0]+"\n"
-            false
-          else 
-            STDERR.print('  '*[log_levelInt-2,0].max) unless str[0] == 0
-            str = str[1..-1] if (0==str[0])
-            STDERR.print str
-            STDERR.print("\n") unless str[-1] == 0       
-            true
-          end
-        else
-          false
-        end
-      end
+       if !@cli_log_level.nil? && log_levelInt <= @cli_log_level
+         str = yield;
+         unless(str.instance_of? String)
+           STDERR.print "misuse of cli_log() -- block should return string at "+caller[0]+"\n"
+           false
+         else 
+           STDERR.print('  '*[log_levelInt-2,0].max) unless str[0] == 0
+           str = str[1..-1] if (0==str[0])
+           STDERR.print str
+           STDERR.print("\n") unless str[-1] == 0       
+           true
+         end
+       else
+         false
+       end
+     end
       
       def switch(sym_or_string)
         if sym_or_string.kind_of? Symbol
@@ -491,6 +560,7 @@ module Markus
           sym_or_string
         end
       end
+
     end #module App
   end #module Cli
 end #module Markus
