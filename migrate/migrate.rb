@@ -32,7 +32,7 @@ module Markus
           :action => {:action=>:open_file, :as=>'w'}
         }
         @cli_commands[:make_transform_scaffold] = {
-          :description => 'Generates a transformation file template '+
+          :description => 'generates a transformation file template '+
             '(ruby code) and outputs it to STDOUT.'
         }
         @cli_commands[:make_dirty_xml] = {
@@ -49,6 +49,24 @@ module Markus
             }
           ]
         }
+        @cli_commands[:make_clean_xml] = {
+          :description => %{to be used in conjunction with "make-dirty-xml." After you finish adding data to the xml file, this removes all objects that remain marked as "dirty" (stale), that is all objects that weren't added by or updated by the data import.  (outputs to STDOUT)},
+          :required_arguments => [
+            {  :name => :XML_IN,
+               :description => "the xml file you are pruning of dirty entries",
+               :validations => [:file_must_exist],
+               :action    => {:action=>:open_file, :as=>'r'}
+            },
+            {  :name => :XPATH,
+               :description => "the path to the elements you want to mark as dirty",
+               :validations => [
+                 {:type=>:regexp, :regexp=>%r{(?:/?[\da-z_\-:]+)+}i, :message=>'your xpath cannot end in a slash '+
+                   'because w\'re gonna add some stuff after it.'
+                  }
+                ],               
+            }
+          ]
+        }        
         @cli_commands[:csv_to_xml] = {
           :description => 'the csv will be run through the filter and data will be added '+
           'to an existing xml document (by calling user-defined methods.) Outputs result to STDOUT.',
@@ -93,6 +111,9 @@ module Markus
                   :message=>'Invalid specifiction -- please follow the pattern "AA:11 field_name"'
                 }
               ]
+            },
+            :stop => { :description => "the row before this one is the last one processed.",
+              :validations => [ {:type=>:regexp, :regexp=>/^\d+$/} ]
             }
           },
           :required_arguments => [
@@ -136,6 +157,10 @@ module Markus
         cli_log(6){ "added 'skip_cols' line processors. skipping: "+@skip_cols.keys.join(',')  }
       end      
       
+      def cli_process_option_stop given_opts, k
+        @line_patterns << {:line_number => given_opts[k][0].to_i, :action => :stop }
+      end
+      
       def cli_process_option_fields(given_opts, k)
         line_numbers = given_opts[:fields][0].split(/, */).map{|s|s.to_i}
         given_opts[:fields] = line_numbers
@@ -175,15 +200,15 @@ module Markus
       #end
 
       def client_log msg
-        cli_file(:client_log).puts msg
+        cli_file(:client_log).puts(msg) if cli_has_file(:client_log)
         STDERR.puts(msg)  # we multiplex it out to our own private, more detailed log
       end
       
-      # can be overridden by client
-      def csv_to_xml_finish; 
-        STDOUT << @xml_doc.to_s if @xml_doc
-      end
-      
+      ## can be overridden by client
+      #def csv_to_xml_finish; 
+      #  STDOUT << @xml_doc.to_s if @xml_doc
+      #end
+      #
       def match_line
         matching_patternData = nil           
         do_delete = false
@@ -226,14 +251,16 @@ module Markus
               "rows are by running with -ddddd debugging."+
               " (the row: \""+row.join(',')[0,60]+"...")              
             end
-            cli_log(4){ "\000line #{@csv_line} doing \"#{do_this}\" with line: \n"+
+            cli_log(4){ "\000line #{@csv_line} doing \"#{do_this}\" with: \n"+
              (@csv_row_arr.join(','))[0,77]+'...'
             }
             next if do_this == 'skip' # small optimization
+            break if do_this == 'stop' # instead of catch/throw
             use_row = @field_names ? get_processed_row : @csv_row_arr
             __send__('csv_process_row_'+do_this,matching_patternData,use_row,line_index)
           end
-          csv_to_xml_finish
+          #csv_to_xml_finish
+          STDOUT << @xml_doc.to_s
         rescue MigrateFailure => e
           puts e.message
         else
@@ -297,20 +324,20 @@ module Markus
         # but if there are blank cells in the middle, leave them (ick!)
         # i need to test if this step is even necessary #*
         [*0..(@csv_row_arr.size-1)].reverse.each { |i| orig_row.delete_at(i) if orig_row[i].nil? }
-        
-        # to deal with columns we are skipping, we will make a hash that maps 
+
+        # in case we have columns we are skipping, we will make a hash that maps 
         # column numbers to field names, called "field_names". note the keys are integers
         # that correspond to column offsets, but the aren't necessarily contiguous, hence hash not array.
-        @field_names = Hash[Array(*[0..orig_row.size-1]).zip(orig_row.map{|x|normalize_fieldname(x)})].reject!{|k,v| @skip_cols[k]}
+        @field_names = Hash[Array(*[0..orig_row.size-1]).zip(orig_row.map{|x|normalize_fieldname(x)})]
+        @field_names.reject!{|k,v| @skip_cols[k]} if @skip_cols
                 
         # in the wierd cases where a document repeats the same field name but might have different values,
-        # we want to be able to report it. 
-                
+        # we want to be able to report it and make an intelligent guess as to which column we want to use.
         @repeated_field_names = {}
         if (@field_names.size > @field_names.values.uniq.size)
-          @field_names.keys.sort.each_cons(2) do |pair| 
-            @repeated_field_names[@field_names[pair[0]]] = true if @field_names[pair[0]] == @field_names[pair[1]]
-          end
+          # we don't care which column it's in          
+          @field_names.each{|k,v| @repeated_field_names[v]||=0; @repeated_field_names[v]+=1;} 
+          @repeated_field_names.delete_if{|k,v| v==1}
         end
       end
       
@@ -329,14 +356,50 @@ module Markus
       end #def
 
       def cli_execute_make_dirty_xml
-        @xml_doc = Hpricot @cli_files[:fh][:XML_IN]
+        @xml_doc = Hpricot cli_file :XML_IN
         els = @xml_doc.search(@cli_arguments[:XPATH])
         if (0==els.count)
           raise MigrateFailure("Sorry, coundn't find any elements with \"#{@cli_arguments[:XPATH]}\"")
         end
         els.attr('cleanliness','dirty')
         print @xml_doc.to_s
+      end
+      
+      def cli_execute_make_clean_xml
+        @xml_doc = Hpricot cli_file :XML_IN
+        all_path = @cli_arguments[:XPATH][0]
+        dirty_tail = %{[@cleanliness='dirty']}
+        all_els = @xml_doc.search(all_path)
+        dirty_els = all_els.search dirty_tail
+        if (0==dirty_els.count)
+          cli_log(0){%{There were no elements matching "@cli_arguments[:XPATH]"}}
+        else
+          total_count = all_els.count
+          dirty_count = dirty_els.count
+          client_log(%{Removing #{dirty_count} elements})
+          dirty_els.each do |el|
+            client_log("\n\nRemoving old element: \n"+el.to_html)
+          end
+          dirty_els.remove()
+          new_count = @xml_doc.search(all_path).count
+          client_log(%{Removed #{dirty_count} old elements from a total of #{total_count} to leave a remaining }+
+            %{#{new_count} items.}
+          )
+        end
+        print @xml_doc.to_s        
+      end
+      
+      def opt_or_arg_action_open_file(action, var_hash, var_name)
+        if :hpricot==action[:as]
+          @cli_files[var_name] = {
+            :fh       => Hpricot(File.open(var_hash[var_name],'r')),
+            :filename => var_hash[var_name]
+          }
+        else  
+          super
+        end
       end      
+      
     end #class Migrate
   end #module Migrate
 end #module Markus
