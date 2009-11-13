@@ -51,6 +51,12 @@ module Markus
       
       def cli_post_init #* this might get replaced by an "add command" type of thing
 
+        if (0 < @cli_global_options.size)
+          @cli_commands.each do |name,command|
+            cli_populate_global_options command
+          end
+        end
+        
         # add an entry in the commands structure for each method even if it doesn't have metadata
         self.methods.each do |meth| 
           if ((m = /^cli_execute_(.*)$/.match(meth)) && @cli_commands[m[1].to_sym].nil?)
@@ -140,9 +146,13 @@ module Markus
         }      
       end
       
-      def cli_activate_opt_or_arg(action, var_hash, var_name)
-        do_this = 'cli_activate_opt_or_arg_'+action[:action].to_s
-        __send__ do_this, action, var_hash, var_name
+      def cli_activate_opt_or_arg action, var_hash, var_name
+        if (action.instance_of? Proc)
+          var_hash[var_name] = action.call(var_hash[var_name])
+        else
+          do_this = 'cli_activate_opt_or_arg_'+action[:action].to_s
+          __send__ do_this, action, var_hash, var_name
+        end
       end
       
       def cli_validate_file_must_exist(validation_data, var_hash, var_name)
@@ -157,8 +167,8 @@ module Markus
         value = var_hash[var_name]  
         re = validation_data[:regexp]
         if (! matches = (re.match(value))) 
-          raise SyntaxError.new(%{Error with --#{var_name}=#{value}: }+
-          validation_data[:message]+' (regexp: '+re.to_s+')')
+          msg = validation_data[:message] || "failed to match against regular expression #{re}"
+          raise SyntaxError.new(%{Error with --#{var_name}="#{value}": #{msg}})
         end
         var_hash[var_name] = matches if matches.size > 1 # clobbers original, only when there are captures ! 
       end
@@ -199,12 +209,12 @@ module Markus
         if use_outermost_brackets
           _el_recurso(list,left,right,use_outermost_brackets=1)
         else
-          list.shift + _el_recurso(list,left,right,use_outermost_brackets=1)
+          list.shift.to_s + ' ' + _el_recurso(list,left,right,use_outermost_brackets=1)
         end
       end
       
       def _el_recurso(list,left,right,use_outermost_brackets=1)
-        %{#{left}#{list.shift.to_s}#{(list.size > 0 ? el_recurso(list,left,right,true) : '')}#{right}}
+        %{#{left}#{list.shift.to_s}#{(list.size > 0 ? (' '+el_recurso(list,left,right,true)) : '')}#{right}}
       end
       
       def describe_command(command_data, opts={})  
@@ -235,7 +245,7 @@ module Markus
           args_desc_lines += two_columns(cms[:optional_arguments], opts.merge({:length=>0}))
         end
         if cmd[:splat]
-          usage_parts << el_recurso( Array.new(2,cmd[:splat][:name]) + ['...'], '[', ']', !(cmd[:splat][:min]==1))
+          usage_parts << el_recurso( Array.new(2,cmd[:splat][:name]) + ['...'], '[', ']', !(cmd[:splat][:minimum]==1))
           desc_line = describe_command(cmd[:splat], :length=>:one_line, :is_arg=>1)
           args_desc_lines << desc_line if (0<desc_line.length)                
         end
@@ -264,10 +274,10 @@ module Markus
           :margin => ''
         }.merge(opts)
         ret = []
-        max = 0
-        if (args.instance_of? Hash)
+        if (args.instance_of?(Hash))
           args = args.map{ |k,v| {:name=>k.to_s, :description=>v[:description]}}
         end
+        max = 0        
         args.each do |v|
           max = [max,v[:name].to_s.length].max
         end
@@ -364,8 +374,8 @@ module Markus
       def schlurp_splat_arguments(dirty_args, named_args)
         splat =  @cli_command_data[:splat]
         return unless splat        
-        if splat[:min] && (splat[:min] > dirty_args.count)
-          raise SyntaxError(%{Expecting at least #{splat[:min]} #{splat[:name]}}) # should only ever be 1
+        if splat[:minimum] && (splat[:minimum] > dirty_args.count)
+          raise SyntaxError.new(%{Expecting at least #{splat[:minimum]} #{splat[:name]}}) # should only ever be 1
         end
         named_args[splat[:name]] = dirty_args.clone
         dirty_args.clear
