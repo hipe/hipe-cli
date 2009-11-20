@@ -5,7 +5,7 @@ require 'csv'
 require 'builder'
 require 'json/pure' # the slower more widely available pure ruby variant (we don't need performance here)
 
-module Markus
+module Hipe
   module Migrate
     class MigrateException < Exception; end
     class MigrateFailure < Exception; end    
@@ -402,7 +402,7 @@ module Markus
       
     end #class Migrate
   end #module Migrate
-end #module Markus
+end #module Hipe
 
-Markus::Migrate::Migrate.new.cli_run if $PROGRAM_NAME == __FILE__
+Hipe::Migrate::Migrate.new.cli_run if $PROGRAM_NAME == __FILE__
 # * -- comments with just an asterisk above ('#*') indicate stuff that will be cleaned up later

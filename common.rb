@@ -1,4 +1,4 @@
-module Markus
+module Hipe
   # something we don't expect to go wrong
   class HardException < Exception
   end

@@ -1,6 +1,6 @@
 require File.dirname(__FILE__)+'/common'
 
-module Markus
+module Hipe
   module FileStuff
     def self.file_must_exist(fn)
       unless File.exist?( fn )

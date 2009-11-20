@@ -3,10 +3,10 @@ require 'getopt/long'
 require 'pp'
 require File.dirname(__FILE__)+'/filestuff'
 
-module Markus
+module Hipe
   module Cli 
    
-  class CliException < Exception; end # for errors related to argument handling. ideally would never be thrown
+    class CliException < Exception; end # for errors related to argument handling. ideally would never be thrown
      
     class SyntaxError < Exception # soft errors for user to see.  (might change this to throw/catch?)
      def initialize(msg,opts=nil)
@@ -30,7 +30,11 @@ module Markus
         :debug => {
           :description => 'Type one or more d\'s (e.g. "-ddd" to indicate varying degrees of '+
           'debugging output (put to STDERR).',
-          :getopt_type => Getopt::INCREMENT
+          :getopt_type => Getopt::INCREMENT,
+          :getopt_letter => 'd'
+        },
+        :help => {
+          :description => 'Show this page (option must occur alone)'
         }
       }
 
@@ -40,6 +44,7 @@ module Markus
         @cli_global_options = {}
         @cli_column_padding = 4
         @cli_screen_width = 80
+        @cli_always_log = nil
         
         # the below are the result of parsing the user's input
         @cli_command = nil
@@ -116,18 +121,15 @@ module Markus
           @cli_command_data = parse_command   arg_list
           @cli_arguments   = parse_arguments arg_list
           @cli_options     = parse_options   arg_list
+          method_name = 'cli_execute_'+(@cli_command_data[:name].to_s)        
+          cli_log(4){"\000Running #{method_name}() to implement the command."}  
+          __send__(method_name)
+          cli_log(2){"\000"+cli_app_title+" finished on "+Time.now.to_s}                  
         rescue SyntaxError,SoftException => e
           str = e.message+"\n"+cli_usage_message
           puts str
           return
         end
-                
-        method_name = 'cli_execute_'+(@cli_command_data[:name].to_s)
-        
-        cli_log(4){"\000Running #{method_name}() to implement the command."}
-        #end
-        __send__(method_name)
-        cli_log(2){"\000"+cli_app_title+" finished on "+Time.now.to_s}        
       end #def cli_run
 
       def cli_validate_opt_or_arg(validations_list, var_hash, var_name)
@@ -169,11 +171,12 @@ module Markus
       def cli_validate_regexp(validation_data, var_hash, var_name)
         value = var_hash[var_name]  
         re = validation_data[:regexp]
-        if (! matches = (re.match(value))) 
+        if (! matches = (re.match(value.to_s))) 
+          # the only time we should need to_s is when this accidentally turned against an INCREMENT value
           msg = validation_data[:message] || "failed to match against regular expression #{re}"
           raise SyntaxError.new(%{Error with --#{var_name}="#{value}": #{msg}})
         end
-        var_hash[var_name] = matches if matches.size > 1 # clobbers original, only when there are captures ! 
+        var_hash[var_name] = matches.captures if matches.size > 1 # clobbers original, only when there are captures ! 
       end
 
       # this guy makes string keys and string values!
@@ -311,13 +314,18 @@ module Markus
         # raise SyntaxError.new('Please indicate a command.') if (arg_list.size==0)
         arg_list << 'help' if arg_list.size==0
         dirty_command = arg_list.shift
-        as_sym = switch( dirty_command )
+        if (arg_list.size==1 && ['-h','--help'].include?(arg_list[0]))
+          arg_list.pop
+          arg_list.unshift dirty_command
+          dirty_command = 'help'          
+        end
+        as_sym = switch( dirty_command )        
         if @cli_commands[as_sym].nil?
           raise SyntaxError.new("Sorry, \"#{dirty_command}\" is not a valid command.");
-        else
-          command_data = @cli_commands[as_sym].clone
         end
+        command_data = @cli_commands[as_sym]
         command_data[:name] = as_sym if command_data[:name].nil?  # not sure when we would indicate a :name if ever
+        @cli_option_names = command_data[:options].keys.map{|x| x.to_s}.sort        
         return command_data
       end
       
@@ -416,21 +424,22 @@ module Markus
           cli_log(2){"NOTICE: skipping the parsing of options because none are present in the grammar!"}
           return
         end
-        opts_grammar = []
-        @cli_command_data[:options].each do |key,value|
+        @cli_opts_grammar = @cli_option_names.map do |name|
+          value = @cli_command_data[:options][name.to_sym]
           if value.nil?
-            raise CliException("Strange -- no value for option node")
+            raise CliException.new("Strange -- no value for option node")
           end
-          arr = ['--'+switch(key), nil, ( value[:getopt_type] || REQUIRED )]
-          opts_grammar.push arr
-        end 
-        
+          [ '--'+name.gsub('_','-'), 
+            value[:getopt_letter] ? ('-'+value[:getopt_letter]) : nil,
+            value[:getopt_type] || REQUIRED]
+        end
+        cli_log(6){ spp :cli_opts_grammar, @cli_opts_grammar }
         begin
-          given_opts = Long.getopts(*opts_grammar); # splat operator makes an array into a series of arguments
+          given_opts = Long.getopts(*@cli_opts_grammar); # splat operator makes an array into a series of arguments
         rescue Getopt::Long::Error => e
           raise SyntaxError.new( e.message )
         end
-        
+
         # use symbol keys instead of strings, because it is what we are used to and it corresponds to other code
         given_opts.keys.each{ |k| given_opts[ switch k ] = given_opts[k]; given_opts.delete(k) }
         
@@ -517,7 +526,7 @@ module Markus
         end
       end
 
-      # print the string that results from calling the block iff log_levelInt is less than or equal to
+      # print the string that results from calling the block iff log_level_int is less than or equal to
       # the log level set by passing --debug flags
 
       # Log levels: level 0 means output no matter what. Level 1 is output informational stuff
@@ -533,23 +542,27 @@ module Markus
       # if a string starts with the null character (zero, ie "\000") it means "do not indent this line"      
       # (otherwise, lines will be indented according to their loglevel)
       # if you end a string with the null character (zero, ie \000) it means "no newline afterwards"
-      def cli_log(log_levelInt, &print_block)
-       if !@cli_log_level.nil? && log_levelInt <= @cli_log_level
-         str = yield;
-         unless(str.instance_of? String)
-           STDERR.print "misuse of cli_log() -- block should return string at "+caller[0]+"\n"
-           false
-         else 
-           STDERR.print('  '*[log_levelInt-2,0].max) unless str[0] == 0
-           str = str[1..-1] if (0==str[0])
-           STDERR.print str
-           STDERR.print("\n") unless str[-1] == 0       
-           true
-         end
-       else
-         false
-       end
-     end
+      def cli_log(log_level_int, &print_block)
+        # if log_level_int.instance_of? String
+        #   string = log_level_int
+        #   log_level_int = 0
+        # end
+        if @cli_always_log || ( !@cli_log_level.nil? && log_level_int <= @cli_log_level )
+          str ||= yield;
+          unless(str.instance_of? String)
+            STDERR.print "misuse of cli_log() -- block should return string at "+caller[0]+"\n"
+            false
+          else 
+            STDERR.print('  '*[log_level_int-2,0].max) unless str[0] == 0
+            str = str[1..-1] if (0==str[0])
+            STDERR.print str
+            STDERR.print("\n") unless str[-1] == 0       
+            true
+          end
+        else
+          false
+        end
+      end
       
       def switch(sym_or_string)
         if sym_or_string.kind_of? Symbol
@@ -563,4 +576,4 @@ module Markus
 
     end #module App
   end #module Cli
-end #module Markus
+end #module Hipe

@@ -6,7 +6,7 @@ require 'pp'
 #
 #
 
-module Markus
+module Hipe
   class StructDiff
     
     attr_accessor :name, :ignore_deletions #when reporting on changed keys
@@ -215,7 +215,7 @@ if $PROGRAM_NAME == __FILE__
         :blah => {:blah=>'1',:blahh=>'2'}
       }
       puts "diff: "
-      pp( d = (Markus::StructDiff.diff(left,right)))
+      pp( d = (Hipe::StructDiff.diff(left,right)))
       puts "\n\n\n";
       print "summary----->\n"
       print d.summarize
@@ -230,7 +230,7 @@ if $PROGRAM_NAME == __FILE__
       right = {
         :firstname=>'sara'
       }
-      d = Markus::StructDiff.diff(left,right)
+      d = Hipe::StructDiff.diff(left,right)
       d.filter_for(:firstname,:left){ "WANKERS" }      
       puts "Your diff: "
       pp d
