@@ -1,0 +1,5 @@
+== 0.0.0 / 2009-11-19
+
+* 1 major enhancement
+
+  * Birthday! (apologies to webrat) And my first ever gem! yay.

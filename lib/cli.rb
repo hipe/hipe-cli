@@ -1,11 +1,11 @@
 require 'rubygems'
 require 'getopt/long'
 require 'pp'
-require File.dirname(__FILE__)+'/filestuff'
 
 module Hipe
   module Cli 
-   
+    VERSION = '0.0.0'
+    
     class CliException < Exception; end # for errors related to argument handling. ideally would never be thrown
      
     class SyntaxError < Exception # soft errors for user to see.  (might change this to throw/catch?)
@@ -161,11 +161,15 @@ module Hipe
       end
       
       def cli_validate_file_must_exist(validation_data, var_hash, var_name)
-        FileStuff.file_must_exist(var_hash[var_name])
+        unless File.exist?( fn )
+          raise SoftException.new("file does not exist: "+fn)
+        end
       end
       
       def cli_validate_file_must_not_exist(validation_data, var_hash, var_name)
-        FileStuff.file_must_not_exist(var_hash[var_name])
+        if File.exist?( fn )
+          raise SoftException.new("file must not already exist: "+fn)
+        end
       end      
       
       def cli_validate_regexp(validation_data, var_hash, var_name)
