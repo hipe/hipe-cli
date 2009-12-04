@@ -3,7 +3,7 @@ module GemHelpers
 
   def generate_gemspec
     $LOAD_PATH.unshift(File.expand_path(File.join(File.dirname(__FILE__), "lib")))
-    require "cli"
+    require 'hipe-cli.rb'
     
     Gem::Specification.new do |s|    
       s.name      = 'hipe-cli'
@@ -29,7 +29,7 @@ module GemHelpers
 
       s.has_rdoc = false  #*
       #s.extra_rdoc_files = %w[README.rdoc MIT-LICENSE.txt History.txt]
-      s.extra_rdoc_files = %w[MIT-LICENSE.txt History.txt]
+      s.extra_rdoc_files = %w[LICENSE History.txt]
 
       #s.add_dependency "nokogiri", ">= 1.2.0"
       #s.add_dependency "rack", ">= 1.0"

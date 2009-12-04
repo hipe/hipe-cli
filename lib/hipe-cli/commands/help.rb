@@ -1,5 +1,5 @@
 module Hipe::Cli::Commands
-  class Help < CommandGrammar
+  class Help < Command
     def initialize(name, data, logger = nil)
       super :help, {
         :description => 'Show detailed help for a given COMMAND, or general help',
