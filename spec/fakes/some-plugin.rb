@@ -1,7 +1,7 @@
 class SomePlugin
   include Hipe::Cli::App
   
-  does :go_daddy, {
+  cli.does :go_daddy, {
     
   }
   
