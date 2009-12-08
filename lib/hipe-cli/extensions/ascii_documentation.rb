@@ -1,7 +1,9 @@
+require 'hipe-core/asciitypesetting'
+
 module Hipe
   module Cli
-    
-    # @todo i couldn't figure out how to actually .. 
+
+    # @todo i couldn't figure out how to actually ..
     def self.recursive_brackets list, left, right
       return '' if list.size == 0  # not the official base case.  just being cautius
       ret = list[0]
@@ -10,13 +12,13 @@ module Hipe
       end
       ret
     end
-    
+
     module Library
       module Elements # a request object gets extended with this and returned
         class HelpRequest
           include Executable
-          def initialize(request); 
-            @request = request 
+          def initialize(request);
+            @request = request
           end
           def execute! app
             @cli, @out, @command, @screen = app.cli, app.cli.out, @request[:COMMAND_NAME], app.cli.screen
@@ -28,57 +30,82 @@ module Hipe
           def execute_app_help_page
             left = %{usage: #{@cli.invocation_name} }
             right = Hipe::AsciiTypesetting::FormattableString.new(@cli.full_inner_syntax)
-            @out.print left
+            @out << left
             @out.puts right.word_wrap_once!(@screen[:width]-left.size) # @todo bug when...
             @out.puts right.word_wrap!(@screen[:width]-left.length).indent!(left.length)
-            # for second line, if it has a description (and maybe a version) , go 
+            # for second line, if it has a description (and maybe a version) , go
             if (line = @cli.description)
               if (@cli.commands[:version])
                 version_number = ( @cli.commands[:version] << ['--bare'] ).execute!( @cli.sub_buffer )
                 line << %{ version #{version_number}}
               end
               @out.puts line
-            end            
-            @out.puts %{\nAvailable subcommand#{@cli.commands.count > 1 ? 's' : ''}:}
-            @cli.commands.each{|k,v| @out.puts v.oneline(@screen) }
+            end
+            size = @cli.commands.size + @cli.plugins.size
+            sp = Hipe::Lingual.en{sp(np(adjp('Available'),'subcommand',size))}
+            sp.np.say_count = false
+            @out.puts %{#{sp.say.gsub(/\.?$/,'')}:}
+            list_commands @cli.commands
+            @cli.plugins.each do |x,y|
+              @out.puts "\n"
+              cli = y.dereference.cli
+              @out.puts cli.qualified_name + (cli.description ? %{ - #{cli.description}} : '')
+              list_commands cli.commands
+            end
             @out.puts %{\nSee "#{@cli.invocation_name} help COMMAND" for more information on a specific command.}
           end
-          def execute_help_on_bad_command
-            @out.puts %{#{@cli.invocation_name}: Sorry, there is no "#{@command}" command. }+
-            %{See "#{@cli.invocation_name} --#{@cli.commands[:help].long_name}"};
+
+          def list_commands(commands)
+            commands.each{|x,y| @out.puts y.oneline(@screen) }
+          end
+
+          def execute_help_on_invalid_command
+            hacko = [@command]
+            if (plugin = @cli.plugins.plugin_for_argv(hacko))
+              hacky = ['help', hacko[0]]
+              plugin.cli << hacky
+            else
+              @out.puts %{#{@cli.invocation_name}: Sorry, there is no "#{@command}" command. }+
+              %{See "#{@cli.invocation_name} --#{@cli.commands[:help].long_name}"};
+            end
           end
         end
       end
     end
-  end 
+  end
 end
 
 module Hipe
   module Cli
-    
+
     class Cli
-      def full_outer_syntax 
+      def full_outer_syntax
         invocation_name + full_inner_syntax
       end
-      # to do git-like indentation we need everything that follows the app name separately 
+
+      def qualified_name
+        @parent ? %{#{@parent.invocation_name} #{plugin_name}} : invocation_name
+      end
+
+      # to do git-like indentation we need everything that follows the app name separately
       def full_inner_syntax
-        #@todo for the next refactor.  
+        #@todo for the next refactor.
         # Options are like commands that take zero or one argument and can appear multiple times.
         arr = @commands.select{|k,v| v.short_name_long_name_syntax }.map{|x| x[1].short_name_long_name_syntax}
         app_opts = arr.size > 0 ? %{#{arr * ' '} } : ''
-        %{#{app_opts}COMMAND [OPTIONS] [REQUIRED_ARGS] [OPTIONAL_ARGS]}        
+        %{#{app_opts}COMMAND [OPTIONS] [REQUIRED_ARGS] [OPTIONAL_ARGS]}
       end
     end
-        
+
     class Option
-      
+
       def full_outer_syntax
         %{[#{full_inner_syntax}]}
       end
       def value_name
         @data[:value_name] ||
         /([a-z]+)$/.match(@name.to_s).captures[0].upcase
-      end      
+      end
       def full_inner_syntax
         appends = (@type == :required) ? [%{ #{value_name}}, %{=#{value_name}}] : ['','']
         short_and_long = []
@@ -87,7 +114,7 @@ module Hipe
           if @type == :increment
             short_and_long << Hipe::Cli.recursive_brackets([sn,sn,'...'],'[',']')
           else
-            short_and_long << %{#{sn}#{appends[0]}}            
+            short_and_long << %{#{sn}#{appends[0]}}
           end
         end
         if long_name
@@ -96,8 +123,11 @@ module Hipe
         short_and_long * '|'
       end
     end
-    
+
     module CommandLike
+      def cli= cli # for now just for
+        @cli = cli
+      end
       def oneline screen
         first_col = sprintf(%{%-#{screen[:col1width]}s},%{#{' '*screen[:margin]}#{invocation_name}})
         # we won't deal with what if it's too long yet @todo
@@ -105,9 +135,9 @@ module Hipe
         second_col = Hipe::AsciiTypesetting::FormattableString.new(desc).sentence_wrap_once!(screen[:col2width])
         %{#{first_col}#{second_col}}
       end
-      
+
       # kind of hackerly -- for those special commands like 'version' and 'help'.
-      # for now the pattern is "if a command has a short name or a long name, it can act as 
+      # for now the pattern is "if a command has a short name or a long name, it can act as
       # an option passed to the application""
       def short_name_long_name_syntax
         blah = []
@@ -116,16 +146,16 @@ module Hipe
         return nil if blah.size == 0
         %{[#{blah * '|'}]}
       end
-      
+
       # @return the formatted string with help info. -- this doesn't write to any buffers like app does
       # @param cli needs this for the app name
       def help_page cli
-        el = Element.new        
+        el = Element.new
         screen = cli.screen
         out = Hipe::BufferString.new
         out.puts name.to_s + (description ? %{ - #{description}} : '') + "\n\n"
         out.puts "usage: #{cli.invocation_name} #{invocation_name} #{full_inner_syntax}\n\n"
-        col1width,col2width = screen[:col1width], screen[:col2width]        
+        col1width,col2width = screen[:col1width], screen[:col2width]
         margie = ' '*screen[:margin]
         min_width = [0, screen[:col1width] - screen[:margin] * 2 ].max
         format = %{#{margie}%-#{min_width}s#{margie}} # for first column
@@ -145,8 +175,8 @@ module Hipe
         end
         out
       end
-      
-      # the command's syntax not including the app name or the command name (hence "inner").  
+
+      # the command's syntax not including the app name or the command name (hence "inner").
       #"Full" because we explicate the syntax of each option, as opposed to just saying [OPTIONS]
       def full_inner_syntax
         el = Element.new
@@ -154,29 +184,42 @@ module Hipe
         elements += @options.map{|k,v| v.full_outer_syntax }
         elements += @required.map{|el_data| el.flyweight(el_data).name }
         names    = @optionals.map{|el_data| el.flyweight(el_data).name }
-        elements += [%{[#{Hipe::Cli.recursive_brackets(names,' [',']')}]}] if @optionals.size > 0 
+        elements += [%{[#{Hipe::Cli.recursive_brackets(names,' [',']')}]}] if @optionals.size > 0
         el.flyweight(@splat) if @splat
         elements += ['['+Hipe::Cli.recursive_brackets(Array.new(2,el.name)+['...'],' [',']')+']'] if @splat
         elements * ' '
-      end  
+      end
     end
     module ElementLike
-      def flyweight(data)
-        @data = data
-        self
-      end
-      def name
-        @data[:name].to_s
-      end
+
+      # @return a string describing this argument or option
+      # If the element does not have a description string, one is attempted by
+      # describing various validation info.  If a description string is provided,
+      # it can constain placeholders such as %enum% or %range% that will be
+      # substituted with sentences describing the predicate @todo offload predicate description
       def description
-        enum = Hipe::Lingual::List[@data[:enum]].or{|x| x.to_s} if @data[:enum]
-        if (@data[:description]) 
-          if enum
-            @data[:description].gsub('%enum%', enum)
-          else
-            @data[:description]
+        replacements = OrderedHash.new
+        replacements[:enum] = Hipe::Lingual::List[@data[:enum]].or{|x| x.to_s} if @data[:enum]
+        replacements[:regexp_sentence] = @data[:regexp_sentence] if @data[:regexp_sentence]
+        if @data[:range]
+          low, hi = @data[:range].begin, @data[:range].end
+          replacements[:range] = %{must be between #{low} and #{hi}}
+        end
+        all_keys = @data.keys + (@data[:it] ? @data[:it] : []) + (@data[:they] ? @data[:they] : [])
+        replacements[:is_jsonesque] = "must be a jsonesque string" if @data[:is_jsonesque]
+        these = [:must_exist,:must_not_exist] & all_keys
+        replacements[:must_exist] = 'File must exist' if these.include? :must_exist
+        replacements[:must_not_exist] = 'File must not exist' if these.include? :must_not_exist
+        desc = @description || @data[:description] # @todo
+        if desc
+          re = Regexp.new(replacements.keys.map{|x| %{%#{x}%} } * '|')
+          desc.gsub!(re) do |match|
+            key = match.slice(1,match.size-2).to_s
+            replacements[key]
           end
-        elsif @data[:enum] then enum
+          desc
+        elsif replacements.size > 0
+          desc = replacements.values.join('  ') # @sentence
         else %{[no description]} end
       end
     end

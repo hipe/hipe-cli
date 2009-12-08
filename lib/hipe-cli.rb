@@ -3,78 +3,82 @@ require 'getopt/long'
 require 'orderedhash'
 require 'hipe-core/bufferstring'
 require 'hipe-core/lingual'
-require 'hipe-core/asciitypesetting'
-require 'hipe-gorillagrammar'
 
 module Hipe
   module Cli
     VERSION = '0.0.1'
-    class CliException < Exception; 
+    class CliException < Exception
+      attr_accessor :details
       def initialize(str, info={})
         super(str)
-        @info = info
+        @details = info
       end
     end    # base class for all exceptions
-    class SoftException < CliException; 
-      def self.factory(data)
+    class SoftException < CliException;
+      def self.factory(string,data)
         require 'hipe-cli/extensions/exceptions'
-        return _factory(data)
+        return _factory(string,data)
       end
     end # user input errors soft errors for user to see.
     class HardException < CliException; end # for errors related to parsing command grammars, etc.
     class PrefixNotRecognizedException < SoftException; end   # user types a prefix for an unknown plugin
-    class PluginNotFoundException < HardException; end    # failure to load a plugin     
+    class PluginNotFoundException < HardException; end    # failure to load a plugin
     class CommandNotFound < SoftException; end
     class SyntaxError < SoftException; end
-    class ValidationFailure < SoftException; 
-      def self.factory(*args)
-        require 'hipe-cli/extensions/exceptions'
-        return _factory(*args)
-      end
-    end        
-      class Cli
-      attr_reader :commands, :plugins, :libraries, :help_on_empty
-      attr_accessor :out, :help_on_emtpy, :screen, :parent, :plugin_name, :description, :app_instance
+    class ValidationFailure < SoftException; end
+    class Cli
+      attr_reader :commands, :plugins, :libraries, :help_on_empty, :plugin_name, :parent
+      attr_accessor :out, :help_on_emtpy, :screen, :description, :app_instance
       def initialize app_class
         @app_class = app_class
         @commands = OrderedHash.new
         @plugins = Plugins.new
         @out = $stdout
         @help_on_empty = true
-        @screen = {:width => 76, :margin=>3, :col1width=>14, :col2width=>59 }
-      end      
+        @screen = {:width => 76, :margin=>3, :col1width=>30, :col2width=>36 }
+      end
 
       def does name, mixed=nil
         case mixed
           when String then mixed = {:description => mixed }
           when nil then mixed = {:library => true}
         end
-        @commands[ (command = Command.factory(name, mixed)).name ] = command 
+        @commands[ (command = Command.factory(name, mixed)).name ] = command
       end
-      
+
       def plugin name, class_identifier
         @plugins[name] = AppReference.new(class_identifier,self,name)
       end
-            
+      
+      def activate_as_plugin parent_cli, my_name
+        @parent = parent_cli
+        @plugin_name = my_name
+        @out = parent_cli.out # our output buffer should be the same as theirs
+        me = self
+        @commands.each{|x,y| y.cli = me } # for doc gen @todo
+      end
+
       def << argv
         raise HardException.new("must be array") unless argv.kind_of? Array
         if (argv.length > 0 && plugin = plugins.plugin_for_argv(argv))
-          plugin << argv
+          plugin.cli << argv
         else
           begin
             action = parse_argv argv
             action.execute! @app_instance
           rescue SoftException => e
             out.puts e.message
+            out.puts %{Please see "#{invocation_name} -h #{e.details[:command].invocation_name}" for more info.} if
+              e.details[:command]
           end
+          out
         end
-        out
       end
-      
+
       def parse_argv argv
         command_name = argv.shift
         if command_name.nil?
-          if (@help_on_empty) 
+          if (@help_on_empty)
             command_name = 'help'
             command_symbol = :help
           end
@@ -88,27 +92,27 @@ module Hipe
           command_symbol = command_name.gsub('-','_').to_sym
         end
         if @commands[command_symbol]
-          @commands[command_symbol].cli = self           
+          @commands[command_symbol].cli = self
           @commands[command_symbol] << argv
         else
           UnrecognizedRequest.new(command_name)
         end
       end
-      
+
       def invocation_name
-        @parent ? %{#{@parent.invocation_name}:#{plugin_name}} : File.basename($PROGRAM_NAME)
+        File.basename($PROGRAM_NAME)
       end
-      
+
       # write the contents of your buffer to the buffer provided
       def >> buffer; buffer << out.read end
-      
-      def expecting 
+
+      def expecting
         (@commands.map{|pair| pair[1].name} + @plugins.map do |p|
           app = p[1].dereference
           app.cli.expecting.map{ |x| %{#{p[0]}:#{x}} }
         end ).uniq
       end
-      
+
       # experimental. if you want to execute a command programatically i.e. from another command
       # and you don't wan't that "sub command" to write to the main app's output buffer
       # call this as the parameter to the command's execute!() method instead of self
@@ -120,65 +124,83 @@ module Hipe
       end
 
     end
-    
+
     module Executable
       #def execute! app
     end
-    
+
     # for plugins -- hold a reference to the other app without loading it
     class AppReference
       attr_accessor :initted # keeping track of whether we gave the child our settings like screen and stdout
-      def initialize mixed,parent,name
-        @class_identifier = mixed
-        @parent = parent
-        @name = name
+      def initialize class_or_class_name, parent_cli, plugin_name
+        @class_identifier = class_or_class_name
+        @parent_cli = parent_cli
+        @plugin_name = plugin_name
       end
-      
+
       def dereference
         unless @referent
-          klass =  @class_identifier.instance_of?(String) ? 
+          klass =  @class_identifier.instance_of?(String) ?
             App.class_from_filepath(@class_identifie) : @class_identifier
-          raise HardException.new("plugin class must be Hipe::Cli::App") unless 
+          raise HardException.new("plugin class must be Hipe::Cli::App") unless
             klass.ancestors.include? Hipe::Cli::App
           @referent = klass.new
-          @referent.cli.parent = @parent
-          @referent.plugin_name = @name
+          @referent.cli.activate_as_plugin @parent_cli, @plugin_name
         end
         @referent
       end
     end
-    
+
     module App
       @classes = {}
       def self.class_from_filepath filename
         raise PluginNotFoundException.new(%{Plugin file not found: "#{filename}"}) unless File.exist? filename
         class_name = File.basename(filename).downcase.gsub(/\.rb$/,'').gsub(/(?:[-_]|^)([a-z])/){|m| $1.upcase }
         re = Regexp.new(Regexp.escape(class_name)+'$')
-        require filename        
+        require filename
         classes = @classes.select(){|name,klass| re =~ klass.name }
         raise PluginNotFoundException.new %{Expecting to find a class called "#{class_name}" }+
-          %{in the plugin file "#{filename}"} if classes.size == 0        
+          %{in the plugin file "#{filename}"} if classes.size == 0
         raise HardException.new %{We need better logic to deal with files of same names in diff. folders}+
         %{(with name: "#{class_name}")} if classes.size > 1
         require filename
         classes[0][1]
       end
       def self.included base
-        base.instance_variable_set('@cli', Cli.new(base))
+        the_same_cli = Cli.new(base)
+        base.instance_variable_set('@cli', the_same_cli)
         base.extend ClassMethods
         base.send(:define_method, :cli) do
-          self.class.cli.app_instance = self; # @todo ugly quickfix -
-          self.class.cli
+          unless @cli
+            @cli = the_same_cli
+            @cli.app_instance = self # @todo ugly quickfix
+          end
+          @cli
         end
         @classes[base.to_s] = base
-      end      
+      end
       module ClassMethods
         def cli; @cli end
       end
     end
-    
+
     module ElementLike
-    
+      def flyweight(data)
+        @data = data
+        self
+      end
+      def name
+        @data[:name].to_s
+      end
+      def title
+        name.to_s.gsub('_',' ')
+      end
+      def keys
+        @data.keys
+      end
+      def [](thing)
+        @data[thing]
+      end
     end
     class Element
       include ElementLike
@@ -198,7 +220,7 @@ module Hipe
           end
         else
           @long_name = name.to_s.gsub('_','-')
-          @short_name = name.to_s[0].chr
+          #@short_name = name.to_s[0].chr
           @name = name
         end
         @type = data[:type] || :required
@@ -209,17 +231,17 @@ module Hipe
         @type ? GETOPT_TYPE[@type] : GETOPT_TYPE[:required]
       end
     end
-    
+
     # CommandLike is a suite of methods for managing the parsing, validation, and description
     # of an individual command.  It assumed that the object is statelss although it need not be
     # It manages the parsing and validation of
     # the options, required arguments ("required"), optional arguments ("optionals"), and splat arguments.
     # This is done in two steps, the first where the string of arguments is turned into name-value pairs,
     # and a second pass where we perform validation of provided elements and checking for missing required
-    # elements. It is broken up like this so that the grammar can also be used to validate 
+    # elements. It is broken up like this so that the grammar can also be used to validate
     # data coming in from a web app
-    # 
-    # The command grammar data can specify any command class it wants to parse data.    
+    #
+    # The command grammar data can specify any command class it wants to parse data.
     module CommandLike
       include ElementLike
       attr_accessor :cli
@@ -242,9 +264,10 @@ module Hipe
         data[:options].each{|k,v| o=Option.new(k,v); @options[o.name] = o } if data[:options]
         @data = data # when we learn metaprogramming we will ... @todo
       end
-      
+
       def invocation_name
-        @name.to_s.gsub('_','-')
+        prefix = ( cli && cli.parent ) ? (cli.plugin_name.to_s+':') : ''
+        ret = prefix + @name.to_s.gsub('_','-')
       end
 
       # Process an array of args and turn it into an executable request object
@@ -254,6 +277,7 @@ module Hipe
       # @return [RequestLike] the  object
       # this argument list should not include the name of this command itself, that should have been
       # shifted off already.  Does this only create a data structure, and not do any validation?
+      def parse; end # tm hack for quick navigation # @fixme
       def << argv, request=nil
         cursor = argv.find_index{|x| x[0].chr != '-' } # the index of the first one that is not an option
         cursor ||= argv.size # either it was all options or the argv is empty
@@ -274,13 +298,28 @@ module Hipe
         tree[:options] = getopt_parse options
         tree[:required] = parse_arguments(@required,required)
         tree[:optionals] = parse_arguments(@optionals,optional)
-        tree[:splat] = splat || []
+        tree[:splat] = (splat && splat.size>0) ? {@splat[:name] => splat} : {}
         tree[:extra] = extra_args_hash
-        request ||= Hipe::Cli::Request.new()        
+        request ||= Hipe::Cli::Request.new()
         request.cli_tree = tree
         request.command = self
         validate!(request)
         request #! make sure you return this puppy
+      end
+
+      def make_lookup
+        @lookup = OrderedHash.new
+        @options.each do |k,opt|
+          @lookup[opt.name] = opt
+        end
+        [@required,@optionals].each do |which|
+          which.each do |el|
+            @lookup[el[:name]] = el
+          end
+        end
+        if (@splat)
+          @lookup[@splat[:name]] = @splat
+        end
       end
 
       def parse_arguments gramma, argv
@@ -292,19 +331,30 @@ module Hipe
         grammar = @options.map {|o| [ %{--#{o[1].long_name}}, %{-#{o[1].short_name}},o[1].getopt_type ] }
         begin
           old_argv = ARGV.dup
-          ARGV.replace(argv) # Getopt is annoying.  why are we using it? 
+          ARGV.replace(argv) # Getopt is annoying.  why are we using it?
           parsed_opts = Getopt::Long.getopts(*grammar);
         rescue Getopt::Long::Error, ArgumentError => e
-          raise SoftException.factory(:type=>:unrecognized_option, :exception=>e, :option=>argv[0], 
+          raise SoftException.factory('',:type=>:option_issue, :exception=>e, :option=>argv[0],
           :command=>self)
         ensure
-          ARGV.replace(old_argv) # this was breaking our tests b/c bacon was reading it.  EVIL Getopt.        
+          ARGV.replace(old_argv) # this was breaking our tests b/c bacon was reading it.  EVIL Getopt.
         end
+        
         # turn {'alpha'=>1,'a'=>,'beta-gamma'=>2, 'b'=>2} into {:alpha=>1, :beta_gamma=>2}
         ks = @options.map{|pair| pair[1].long_name} & parsed_opts.keys
-        Hash[ks.map{|x| x.gsub('-','_').to_sym }.zip(ks.map{|k| parsed_opts[k]})]
-      end # def 
-      
+        this = ks.map{|x| x.gsub('-','_').to_sym }.zip(ks.map{|k| parsed_opts[k]})
+        
+        # sort them in to the original order that was provided on the command line! 
+        order = argv.map do |x| 
+          md = /^(?:-([a-z0-9])|--([-_a-z0-9]{2,}))/i.match(x)
+          ( md[1] ? @options.select{|k,v| v.short_name == md[1] } :
+          @options.select{|k,v| v.long_name == md[2]} )[0][1].name
+        end
+        
+        this.sort!{|x,y| order.index(x[0]) <=> order.index(y[0])}
+        result = OrderedHash[*this.flatten]
+      end # def
+
       def validate! request
         valid_keys = @required.map{|x| x[:name]} + @optionals.map{|x| x[:name]} + @options.map{|x| x[0]}
         valid_keys << @splat[:name] if @splat
@@ -313,15 +363,28 @@ module Hipe
           sentence = Hipe::Lingual.en{sp(np(adjp('unexpected'),'argument',invalid_keys))}
           errors << ValidationFailure.factory(sentence.say,:type=>:invalid_keys, :invalid_keys=>invalid_keys)
         end
-        if (missing_keys = @required.map{|x| x[:name]} - request.keys).size > 0
+        required_names = @required.map{|x| x[:name]}
+        required_names << @splat[:name] if (@splat && @splat[:minimum] && @splat[:minimum] > 0)
+        if (missing_keys = required_names - request.keys).size > 0
           sentence = Hipe::Lingual.en{sp(np(adjp('expected'),'argument',pp('missing'),missing_keys))}
           errors << ValidationFailure.factory(sentence.say,:type=>:missing_keys, :missing_keys=>missing_keys)
         end
-        debugger
-        'x'
-      end
-
-    end
+        require 'hipe-cli/extensions/predicates'
+        make_lookup unless @lookup
+        engine = PredicateEngine.new request
+        element_object = Element.new
+        request.keys.each do |parameter_name|
+          element = @lookup[parameter_name]
+          element = element_object.flyweight(element) if element.kind_of? Hash
+          begin
+            engine.run_predicates(element, parameter_name)
+          rescue ValidationFailure => e
+            errors << e
+          end
+        end
+        request.errors = errors
+      end # validate!
+    end # CommandLike
 
     class Command
       include CommandLike
@@ -332,7 +395,7 @@ module Hipe
       public
       def self.factory name, data
         if data[:library]
-          class_name = 
+          class_name =
             if (data[:class_name]) then data[:class_name]
             elsif (name.kind_of? String)
               md = name.match(/^-([a-z]) --([-a-z0-9]+)$/i)
@@ -350,44 +413,54 @@ module Hipe
 
     module RequestLike
       attr_reader :cli_tree
-      attr_accessor :command
+      attr_accessor :command, :errors
+      def valid?
+        (@errors && @errors.size == 0)
+      end
       def cli_tree= tree
         @cli_tree = tree
-        @param = OrderedHash.new
-        [:options,:required,:optionals].each do |which|
+        [:options,:required,:optionals, :splat].each do |which|
           @cli_tree[which].each do |k,v|
-            @param[k] = v
+            self[k] = v
           end
         end
-        @splat = tree[:splat]
         @extra = tree[:extra]
       end
-      
-      def [](key); @param[key] end
-      def keys; @param.keys end
-      
       # prepares the arguments in an order suitable for the app's function and calls it
       # @param [Hipe::Cli::App] app
       # @return the result of the call to the implementing function
       def execute! app
+        unless valid?
+          raise HardException.new("request hasn't been validated yet!") unless @errors
+          error_strings = Hipe::Lingual::List[ @errors.map{|x| x.message} ]
+          sp = Hipe::Lingual.en{ sp(
+            np('issue', pp('preventing','the','request','from','being','processed'),
+              error_strings
+            )
+          ) }
+          raise ValidationFailure.factory(sp.say,:errors=>errors,:command=>@command)
+        end
         raise HardException.new(%{please implement "#{command.name}"}) unless app.respond_to? command.name
         method = app.method(command.name)
         args = @command.required.map{|x| self[x[:name]]} + @command.optionals.map{|x| self[x[:name]]}
         args << self[@command.splat[:name]] if @command.splat
         if (@command.options.size>0)
-          opts = {}
-          @command.options.each{|k,v| opts[k] = self[k] }
+          # maintain the original order of the provided options
+          opts = OrderedHash.new
+          provided = (self.keys & @command.options.keys)
+          provided.each do |sym|
+            opts[sym] = self[sym]
+          end
           args << opts
         end
-        debugger
         method.call(*args)
       end
     end
-    
-    class Request < Hash
+
+    class Request < OrderedHash
       include RequestLike
     end
-    
+
     class UnrecognizedRequest
       include RequestLike
       def initialize command_name
@@ -414,11 +487,11 @@ module Hipe
             %{Sorry, prefix is not associated with any known plugin: "#{prefix}"})
         end
         plugin = plugin_ref.dereference
-        argv[0].replace remainder
+        argv[0] = remainder
         plugin
       end
     end
-    
+
     module Library
       module Elements
         class Version < Command
@@ -443,7 +516,7 @@ module Hipe
             @request = request
           end
           def execute! app
-            version = app.class.const_get :VERSION            
+            version = app.class.const_get :VERSION
             if @request[:bare]
               app.cli.out << version
             else
@@ -469,28 +542,28 @@ module Hipe
           @cli_files[var_name] = {
             :fh => File.open(var_hash[var_name], action[:as]),
             :filename => var_hash[var_name]
-          }      
+          }
         end
         def must_match_regexp(validation_data, var_hash, var_name)
-          value = var_hash[var_name]  
+          value = var_hash[var_name]
           re = validation_data[:regexp]
-          if (! matches = (re.match(value.to_s))) 
+          if (! matches = (re.match(value.to_s)))
             # the only time we should need to_s is when this accidentally turned against an INCREMENT value
             msg = validation_data[:message] || "failed to match against regular expression #{re}"
             raise SyntaxError.new(%{Error with --#{var_name}="#{value}": #{msg}})
           end
-          var_hash[var_name] = matches.captures if matches.size > 1 # clobbers original, only when there are captures ! 
+          var_hash[var_name] = matches.captures if matches.size > 1 # clobbers original, only when there are captures !
         end
         def must_exist(validation_data, var_hash, var_name)
           unless File.exist?( fn )
             raise SoftException.new("file does not exist: "+fn)
           end
-        end        
+        end
         # this guy makes string keys and string values!
         # pls note that according to apeiros in #ruby, "your variant of json isn't json"
         def jsonesque(validation_data, var_hash, var_name)
           var_hash[var_name] = Hash[*(var_hash[var_name]).split(/:|,/)] # thanks apeiros
-        end 
+        end
       end # Predicates
     end # Library
   end # Cli
