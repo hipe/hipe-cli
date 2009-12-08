@@ -48,9 +48,13 @@ module Hipe
             list_commands @cli.commands
             @cli.plugins.each do |x,y|
               @out.puts "\n"
-              cli = y.dereference.cli
-              @out.puts cli.qualified_name + (cli.description ? %{ - #{cli.description}} : '')
-              list_commands cli.commands
+              begin
+                cli = y.dereference.cli
+                @out.puts cli.qualified_name + (cli.description ? %{ - #{cli.description}} : '')
+                list_commands cli.commands
+              rescue Hipe::Cli::PluginNotFoundException => e
+                @out.<< %{(plugin "#{y.plugin_name}" not found)}
+              end
             end
             @out.puts %{\nSee "#{@cli.invocation_name} help COMMAND" for more information on a specific command.}
           end

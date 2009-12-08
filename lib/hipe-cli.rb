@@ -6,6 +6,7 @@ require 'hipe-core/lingual'
 
 module Hipe
   module Cli
+    DIR = File.expand_path(File.dirname(__FILE__)+'/../') # really only needed for plugin_spec    
     VERSION = '0.0.1'
     class CliException < Exception
       attr_accessor :details
@@ -131,6 +132,7 @@ module Hipe
 
     # for plugins -- hold a reference to the other app without loading it
     class AppReference
+      attr_reader :plugin_name
       attr_accessor :initted # keeping track of whether we gave the child our settings like screen and stdout
       def initialize class_or_class_name, parent_cli, plugin_name
         @class_identifier = class_or_class_name
@@ -141,7 +143,7 @@ module Hipe
       def dereference
         unless @referent
           klass =  @class_identifier.instance_of?(String) ?
-            App.class_from_filepath(@class_identifie) : @class_identifier
+            App.class_from_filepath(@class_identifier) : @class_identifier
           raise HardException.new("plugin class must be Hipe::Cli::App") unless
             klass.ancestors.include? Hipe::Cli::App
           @referent = klass.new
@@ -154,7 +156,8 @@ module Hipe
     module App
       @classes = {}
       def self.class_from_filepath filename
-        raise PluginNotFoundException.new(%{Plugin file not found: "#{filename}"}) unless File.exist? filename
+        raise PluginNotFoundException.new(%{Plugin file not found: "#{filename}"}) unless 
+          (filename && File.exist?(filename))
         class_name = File.basename(filename).downcase.gsub(/\.rb$/,'').gsub(/(?:[-_]|^)([a-z])/){|m| $1.upcase }
         re = Regexp.new(Regexp.escape(class_name)+'$')
         require filename
@@ -298,7 +301,7 @@ module Hipe
         tree[:options] = getopt_parse options
         tree[:required] = parse_arguments(@required,required)
         tree[:optionals] = parse_arguments(@optionals,optional)
-        tree[:splat] = (splat && splat.size>0) ? {@splat[:name] => splat} : {}
+        tree[:splat] = (splat && splat.size>0) ? {(@splat[:name]) => splat} : {}
         tree[:extra] = extra_args_hash
         request ||= Hipe::Cli::Request.new()
         request.cli_tree = tree
@@ -310,15 +313,15 @@ module Hipe
       def make_lookup
         @lookup = OrderedHash.new
         @options.each do |k,opt|
-          @lookup[opt.name] = opt
+          @lookup[opt.name.to_sym] = opt
         end
         [@required,@optionals].each do |which|
           which.each do |el|
-            @lookup[el[:name]] = el
+            @lookup[el[:name].to_sym] = el
           end
         end
         if (@splat)
-          @lookup[@splat[:name]] = @splat
+          @lookup[@splat[:name].to_sym] = @splat
         end
       end
 
@@ -374,7 +377,7 @@ module Hipe
         engine = PredicateEngine.new request
         element_object = Element.new
         request.keys.each do |parameter_name|
-          element = @lookup[parameter_name]
+          element = @lookup[parameter_name.to_sym]
           element = element_object.flyweight(element) if element.kind_of? Hash
           begin
             engine.run_predicates(element, parameter_name)
@@ -473,7 +476,9 @@ module Hipe
         Hipe::Lingual::List[cli.expecting].or{|x| %{"#{x}"}}
         if (cli.help_on_empty)
           require 'hipe-cli/extensions/ascii_documentation'
-          out.puts %{See "#{cli.invocation_name} -#{cli.commands[:help].short_name}" for more information.}
+          if cli.commands[:help]
+            out.puts %{See "#{cli.invocation_name} -#{cli.commands[:help].short_name}" for more information.}
+          end
         end
       end
     end
@@ -516,7 +521,8 @@ module Hipe
             @request = request
           end
           def execute! app
-            version = app.class.const_get :VERSION
+            version = app.class.constants.include?('VERSION') ?
+              app.class.const_get('VERSION') : '???'
             if @request[:bare]
               app.cli.out << version
             else
@@ -537,34 +543,6 @@ module Hipe
           end # def
         end # class
       end # end Elements
-      module Predicates # little actions and validations done on elements (options and arguments)
-        def gets_opened action, var_hash, var_name
-          @cli_files[var_name] = {
-            :fh => File.open(var_hash[var_name], action[:as]),
-            :filename => var_hash[var_name]
-          }
-        end
-        def must_match_regexp(validation_data, var_hash, var_name)
-          value = var_hash[var_name]
-          re = validation_data[:regexp]
-          if (! matches = (re.match(value.to_s)))
-            # the only time we should need to_s is when this accidentally turned against an INCREMENT value
-            msg = validation_data[:message] || "failed to match against regular expression #{re}"
-            raise SyntaxError.new(%{Error with --#{var_name}="#{value}": #{msg}})
-          end
-          var_hash[var_name] = matches.captures if matches.size > 1 # clobbers original, only when there are captures !
-        end
-        def must_exist(validation_data, var_hash, var_name)
-          unless File.exist?( fn )
-            raise SoftException.new("file does not exist: "+fn)
-          end
-        end
-        # this guy makes string keys and string values!
-        # pls note that according to apeiros in #ruby, "your variant of json isn't json"
-        def jsonesque(validation_data, var_hash, var_name)
-          var_hash[var_name] = Hash[*(var_hash[var_name]).split(/:|,/)] # thanks apeiros
-        end
-      end # Predicates
     end # Library
   end # Cli
 end # Hipe

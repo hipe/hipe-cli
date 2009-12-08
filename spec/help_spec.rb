@@ -7,6 +7,7 @@ describe  Mexican do
     class Mexican
       include Hipe::Cli::App
       cli.description = "you will have food as if it's from mexico. here."  
+      #cli.does '-h --help'
       cli.does :burrito, "this is a delcious burrito"
       cli.out = Hipe::BufferString.new
       def burrito params
@@ -23,7 +24,7 @@ describe  Mexican do
     mex = Mexican.new    
     mex.cli << shell!('')
     mex.cli >> (str='')
-    str.should.match(/^Unexpected command ""\.  Expecting "burrito" or "taco"\n$/i)
+    str.should.match(/^Unexpected command "help"\.  Expecting "burrito" or "taco"\n$/i)
   end
   
   

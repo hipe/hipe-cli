@@ -6,36 +6,37 @@ Oh = OrderedHash
 
 describe Hipe::Cli::App,"basics" do
 
-  it "should reflect correctly on nonexistent commands" do
-    @app = MainApp.new    
+  it "should reflect correctly on nonexistent commands (b1)" do
+    @app = AppOne.new    
     @app.cli.commands[:not_there].should.equal nil
   end
   
-  it "should reflect correctly on existent commands" do
+  it "should reflect correctly on existent commands (b2)" do
     @app.cli.commands[:bark].should.be.kind_of Hipe::Cli::Command
   end
    
-  it "should parse required, optionals and splat correctly" do
+  it "should parse required, optionals and splat correctly (b3)" do
+    @app = AppOne.new
     request = @app.cli.commands[:bark] << shell!('one two three four five six seven')
     request.cli_tree.should == Hipe::Cli::Request[
       :options=>Oh[],
       :required=>Oh[:target,'one', :req2,'two'],
       :optionals=>Oh[:optl1,'three',:optl2,'four'],
-      :splat=>['five','six','seven'],
+      :splat=>{"splat"=>["five", "six", "seven"]},
       :extra=>Oh[]
     ]
   end
-  
-  it "should parse extra arguments correctly with empty grammar" do
+
+  it "should parse extra arguments correctly with empty grammar (b4)" do
     command = Hipe::Cli::Command.new(:whatever, {})
     request = command << shell!('one two three')
     request.cli_tree.should == Hipe::Cli::Request[
-      :options=>Oh[],:required=>Oh[],:optionals=>Oh[],:splat=>[], 
+      :options=>Oh[],:required=>Oh[],:optionals=>Oh[],:splat=>{}, 
       :extra=>{0=>'one',1=>'two',2=>'three'}
     ]
   end
   
-  it "should parse options correctly" do
+  it "should parse options correctly (b5)" do
     command = Hipe::Cli::Command.new(:whatever, {
       :options => {
         '-x --opt1' => {},
@@ -49,18 +50,20 @@ describe Hipe::Cli::App,"basics" do
   
     request.cli_tree.should == Hipe::Cli::Request[
       :options=>Oh[:opt1,'loud', :opt2,5, :opt4,true],
-      :required=>Oh[],:optionals=>Oh[],:splat=>[], :extra=>Oh[]
+      :required=>Oh[],:optionals=>Oh[],:splat=>{}, :extra=>Oh[]
     ]
   end
   
-  it "should parse an empty string, possibly with errors" do
+  it "should parse an empty string, possibly with errors (b6)" do
+
+      @app = AppOne.new
     request = @app.cli.commands[:bark] << shell!('')
     request.should.be.kind_of Hipe::Cli::Request
-    target = Hipe::Cli::Request[:options,Oh[], :required,Oh[], :optionals,Oh[], :splat,[], :extra,Oh[]]
+    target = Hipe::Cli::Request[:options,Oh[], :required,Oh[], :optionals,Oh[], :splat,{}, :extra,Oh[]]
     request.cli_tree.should.equal target
   end
   
-  it "should parse optionals" do
+  it "should parse optionals (b7)" do
     request = @app.cli.commands[:bark] << shell!('alpha beta gamma delta')
     tree = request.cli_tree
     tree.should.be.kind_of Hash
@@ -68,7 +71,7 @@ describe Hipe::Cli::App,"basics" do
         :target, 'alpha', :req2, 'beta'
       ], :optionals,Oh[
       :optl1, 'gamma', :optl2, 'delta'
-    ], :splat,[], :extra,Oh[]]
+    ], :splat,{}, :extra,Oh[]]
     tree.should.equal target
   end
 end

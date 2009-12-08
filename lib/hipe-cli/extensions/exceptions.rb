@@ -29,7 +29,7 @@ module Hipe
       class InvalidKeys < SyntaxError
         attr_reader :keys        
         def initialize(string,data)
-          super("Syntax error -- "+args[0])
+          super("Syntax error -- "+string)
           @keys = data[:invalid_keys]
         end        
       end

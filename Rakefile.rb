@@ -1,6 +1,7 @@
 # require 'spec' thanks webrat
 require 'spec/rake/spectask'
 require 'rcov/rcovtask'
+require 'ruby-debug'
 
 # desc "Run API and Core specs -- lose this. we are using bacon now"
 # Spec::Rake::SpecTask.new do |t|
@@ -25,7 +26,7 @@ task :bacon do
   require 'matrix'
 
   PROJECT_SPECS = FileList[
-    'spec/*_spec.rb'
+    'spec/help_spec.rb'
   ]
 
   specs = PROJECT_SPECS
@@ -59,13 +60,17 @@ task :bacon do
       else
         total = nil
 
+debugger
         out.each_line do |line|
-          scanned = line.scanf(spec_format)
-
-          next unless scanned.size == 4
-
-          total = Vector[*scanned]
-          break
+          
+          #debugger
+          
+          #scanned = line.scanf(spec_format)
+          #
+          #next unless scanned.size == 4
+          #
+          #total = Vector[*scanned]
+          #break
         end
 
         if total

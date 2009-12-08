@@ -31,12 +31,16 @@ module Hipe
           end
           return  
         end
+        if (element.nil?)
+          raise 'no'
+        end
         do_these = (element.keys & @all_ks)
         do_these += element[:it] if element[:it]
         do_these += element[:they] if element[:they]
         if do_these.size > 0
           do_these.each do |predicate_name|
             classes = PredicateLike.listens_for[predicate_name]
+            # raise HardException.new("unrecognized predicate: #{predicate_name}") unless classes
             classes.each do |klass|
               predicate = klass.new
               predicate.execute element, @request, parameter_name
@@ -107,7 +111,7 @@ module Hipe
         def execute element, request, parameter_name
           str = request[parameter_name]
           res = str.split(/:|,/)
-          raise ValidationFailure.factory(%{invalid jsonesque string: "#{str}"},{}) if (res.size % 2) != 0
+          raise ValidationFailure.factory(%{#{element.title} is an invalid jsonesque string: "#{str}"},{}) if (res.size % 2) != 0
           request[parameter_name] = Hash[*res] # thanks apeiros
         end
       end
@@ -131,6 +135,37 @@ module Hipe
           end
           # clobbers original, only when there are captures !
           request[parameter_name] = matches.captures if matches.size > 1
+        end
+      end
+
+      class Float
+        include PredicateLike
+        listens_for :float
+        def execute element, request, parameter_name
+          val = request[parameter_name]
+          unless /^-?\d+(?:\.\d+)?$/ =~ val
+            raise ValidationFailure.factory(
+              %{#{element.title} must be a number, not "#{val}"},
+              :type => :float_failure, :element => element, :provided => val
+            )
+          end
+          request[parameter_name] = val.to_f
+        end
+      end
+
+      class Range
+        include PredicateLike
+        listens_for :range
+        def execute element, request, parameter_name
+          Float.new().execute element, request, parameter_name
+          value = request[parameter_name]
+          range = element[:range]
+          unless element[:range] === value
+            msg = %{#{element.title} must be within the range #{range.begin} - #{range.end}}
+            raise ValidationFailure.factory(msg, :type=>:range_failure,
+              :range => range, :element=>element
+            )
+          end
         end
       end
     end # Predicates

@@ -25,6 +25,16 @@ class DogSounds
     end
     cli.out.puts s
   end
+  cli.does :pant, {
+    :required => [
+      {:name=> :OUT_FILE, :it=>[:must_not_exist, :gets_opened]},
+      {:name=> :IN_FILE,  :it=>[:must_exist, :gets_opened]},
+      {:name=> :SOME_RANGE, :range =>(1..2) }
+    ]
+  }
+  def pant(out_file, in_file, some_range)
+    cli.out.puts %{out file name: #{out_file[:filename]} and in file name: #{in_file[:filename]}}
+  end
 end
 
 class AnimalSounds

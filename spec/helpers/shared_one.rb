@@ -1,6 +1,6 @@
 
 
-class MainApp
+class AppOne
   include Hipe::Cli::App
   VERSION = 'x.y.z'
   cli.does '-h --help'
@@ -10,7 +10,7 @@ class MainApp
     :options => { :the_volume => {}, :mood => {} },
     :required => [{:name=>'target'}, {:name=>'req2'}],
     :optionals => [{:name=>'optl1'},{:name=>'optl2'}],
-    :splat => {:minimum => 1}
+    :splat => {:minimum => 1, :name=>'splat'}
   }
   def bark request
     @out.puts "barking"
@@ -19,7 +19,7 @@ end
 
 shared "a cli app" do
   before do
-    @app = MainApp.new
+    @app = AppOne.new
   end  
 end
 
