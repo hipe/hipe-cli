@@ -1,5 +1,5 @@
-# bacon spec/basics_spec.rb 
-require 'hipe-core/structdiff'
+# bacon spec/spec_basics.rb 
+require 'hipe-core/struct-diff'
 require File.dirname(__FILE__)+'/helpers/test-strap.rb'
 require File.dirname(__FILE__)+'/helpers/shared_one.rb'
 
@@ -16,8 +16,7 @@ describe Hipe::Cli::App,"basics" do
   end
    
   it "should parse required, optionals and splat correctly (b3)" do
-    @app = AppOne.new
-    request = @app.cli.commands[:bark].prepare_request shell!('one two three four five six seven')
+    request = @app.cli.commands[:bark].prepare_request %w(one two three four five six seven)
     have = request.cli_tree
     want = Hipe::Cli::OrderedRequest[
       :options=>Oh[],
@@ -31,8 +30,8 @@ describe Hipe::Cli::App,"basics" do
   end
 
   it "should parse extra arguments correctly with empty grammar (b4)" do
-    command = Hipe::Cli::Command.new(nil, :whatever, {})
-    request = command.prepare_request shell!('one two three')
+    command = Hipe::Cli::Command.new(nil, {:name=>'x'})
+    request = command.prepare_request %w(one two three)
     request.cli_tree.should == Hipe::Cli::OrderedRequest[
       :options=>Oh[],:required=>Oh[],:optionals=>Oh[],:splat=>{}, 
       :extra=>{0=>'one',1=>'two',2=>'three'}
@@ -40,7 +39,8 @@ describe Hipe::Cli::App,"basics" do
   end
   
   it "should parse options correctly (b5)" do
-    command = Hipe::Cli::Command.new(nil,:whatever, {
+    command = Hipe::Cli::Command.new(nil,{
+      :name => 'blah',
       :options => {
         '-x --opt1' => {},
         '-o --opt2' => {:type=>:increment},
@@ -48,7 +48,6 @@ describe Hipe::Cli::App,"basics" do
         '-z --opt4' => {:type=>:boolean}
       }
     })
-    #args = shell!('--opt1=loud -ooooo --opt4')
     args = ["--opt1=loud", "-ooooo", "--opt4"]
     request = command.prepare_request args
   
@@ -59,7 +58,6 @@ describe Hipe::Cli::App,"basics" do
   end
   
   it "should parse an empty string, possibly with errors (b6)" do
-    @app = AppOne.new
     request = @app.cli.commands[:bark].prepare_request []
     request.should.be.kind_of Hipe::Cli::OrderedRequest
     target = Hipe::Cli::OrderedRequest[:options,Oh[], :required,Oh[], :optionals,Oh[], :splat,{}, :extra,Oh[]]
@@ -67,7 +65,7 @@ describe Hipe::Cli::App,"basics" do
   end
   
   it "should parse optionals (b7)" do
-    request = @app.cli.commands[:bark].prepare_request shell!('alpha beta gamma delta')
+    request = @app.cli.commands[:bark].prepare_request %w(alpha beta gamma delta)
     have = request.cli_tree
     have.should.be.kind_of Hash
     want = Hipe::Cli::OrderedRequest[:options,Oh[], :required,Oh[

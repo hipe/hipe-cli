@@ -1,3 +1,6 @@
+== 0.0.1
+ * existing code cleaned up for 0.0.2 changes
+ * passes all tests, 89% coverage
 == 0.0.0 / 2009-11-19
 * 1 major enhancement
   * existence (apologies to webrat)

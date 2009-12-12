@@ -24,6 +24,7 @@ class DogSounds
       s << " #{k}:#{v} "
     end
     cli.out.puts s
+    cli.out
   end
   cli.does :pant, {
     :required => [
@@ -34,6 +35,7 @@ class DogSounds
   }
   def pant(out_file, in_file, some_range)
     cli.out.puts %{out file name: #{out_file[:filename]} and in file name: #{in_file[:filename]}}
+    cli.out
   end
 end
 

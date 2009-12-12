@@ -10,12 +10,12 @@ class Mexican
   cli.does '-h --help'
   cli.does '-v --version'
   cli.does :burrito, "this is a delcious burrito"
-  # cli.out = Hipe::BufferString.new
+  cli(:out=>:buffer_string)
   def burrito params
     cli.out << "this is your burrito"
   end
   cli.does :taco, "tacos are awesome, everyone loves them.  You should love them too."
-  def burrito params
+  def taco params
     cli.out << "awesome taco time"
   end
   cli.does :enchilada, {:description => "echiladas made by this thing are very awesome because they use "+

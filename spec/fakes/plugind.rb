@@ -1,4 +1,7 @@
 class Plugind
   include Hipe::Cli::App
-  has_cli_command :wankzorzz, {}
+  cli.does :wankzorzz
+  def wankzorzz 
+    cli.out.puts "yes it is a wankzorzz"
+  end
 end

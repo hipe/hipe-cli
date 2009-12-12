@@ -50,6 +50,13 @@ module Hipe
       end
     end
 
+    module Exceptions
+      class FileMustNotExist < ValidationFail; end
+      class FileMustExist    < ValidationFail; end      
+      class RegexpFailure    < ValidationFail; end 
+      class RangeFailure     < ValidationFail; end
+    end
+
     # Predicates can be both assertions about the validity of arguments, and actions
     # carried out on the arguments.  An example of both is a regexp with captures.
     # Such a predicate says "the parameter must match this regexp" and
@@ -59,7 +66,6 @@ module Hipe
     # occur in a certain order.  This is what the :it subelement (array) is for.
     # for example {:type=>:file, :it=>[:must_exist, :gets_opened]}
     module Predicates
-
       # for files, open the file ()
       class GetsOpened
         include PredicateLike
@@ -74,14 +80,14 @@ module Hipe
         end
       end
 
-      # for files, throws a ValidationFailure unless the file exists
+      # for files, throws a ValidationFail unless the file exists
       class MustExist
         include PredicateLike
         listens_for :must_exist
         def execute element, request, parameter_name
           fn = request[parameter_name]
           unless File.exist? fn
-            raise ValidationFailure.factory(%{#{element.title} file does not exist: "#{fn}"},
+            raise Exception.f(%{#{element.title} file does not exist: "#{fn}"},
               :type=>:file_must_exist, :file=>fn, :element=>element
             )
           end
@@ -95,14 +101,14 @@ module Hipe
         def execute element, request, parameter_name
           fn = request[parameter_name]
           if File.exist? fn
-            raise ValidationFailure.factory(%{#{element.title} exists, must not: "#{fn}"},
+            raise Exception.f(%{#{element.title} exists, must not: "#{fn}"},
               :type=>:file_must_not_exist, :file=>fn, :element=>element
             )
           end
         end
       end
 
-      # parse the string using the "jsonesque" pseudo syntax#
+      # parse the string using the "jsonesque" pseudo syntax
       # this is left here for posterity but
       # it's quite ugly to pass jsonesque parameters as values to command line options or arguments ;)
       class IsJsonesque # apeiros: "your variant of json isn't json" ;)
@@ -111,12 +117,15 @@ module Hipe
         def execute element, request, parameter_name
           str = request[parameter_name]
           res = str.split(/:|,/)
-          raise ValidationFailure.factory(%{#{element.title} is an invalid jsonesque string: "#{str}"},{}) if (res.size % 2) != 0
+          raise Exception.f(
+            %{#{element.title} is an invalid jsonesque string: "#{str}"},
+            :type => :validation_fail
+          ) if (res.size % 2) != 0
           request[parameter_name] = Hash[*res] # thanks apeiros
         end
       end
 
-      # assert that the parameter value matches the regexp, throw a ValidationFailure if not.
+      # assert that the parameter value matches the regexp, throw a ValidationFail if not.
       # if the regepx has any captures then the resulting parameter value will be the captures list for the regexp
       # note that this means that if your regexp has any captures then you will parts that are not captured
       # if the regexp does not have any captures then the request parameter is left alone
@@ -129,7 +138,7 @@ module Hipe
           unless matches = re.match(value.to_s) #to_s incase we accidentally turn regexp against an :increment
             msg = element[:regexp_sentence] || "failed to match against regular expression #{re}"
             msg.gsub!(/^it\b/i, element.title) # @hack
-            raise ValidationFailure.factory(msg, :type=>:regexp_failure,
+            raise Exception.f(msg, :type=>:regexp_failure,
               :regexp=>re, :element=>element
             )
           end
@@ -144,9 +153,9 @@ module Hipe
         def execute element, request, parameter_name
           val = request[parameter_name]
           unless /^-?\d+(?:\.\d+)?$/ =~ val
-            raise ValidationFailure.factory(
+            raise Exception.f(
               %{#{element.title} must be a number, not "#{val}"},
-              :type => :float_failure, :element => element, :provided => val
+               :element => element, :provided => val, :type=>:validation_fail
             )
           end
           request[parameter_name] = val.to_f
@@ -162,7 +171,7 @@ module Hipe
           range = element[:range]
           unless element[:range] === value
             msg = %{#{element.title} must be within the range #{range.begin} - #{range.end}}
-            raise ValidationFailure.factory(msg, :type=>:range_failure,
+            raise Exception.f(msg, :type=>:range_failure,
               :range => range, :element=>element
             )
           end

@@ -7,13 +7,16 @@ class AppOne
   cli.does '-v --version'
   cli.does :bark, {
     :description => "this is the sound a dog makes",
-    :options => { :the_volume => {}, :mood => {} },
-    :required => [{:name=>'target'}, {:name=>'req2'}],
-    :optionals => [{:name=>'optl1'},{:name=>'optl2'}],
-    :splat => {:minimum => 1, :name=>'splat'}
+    :required => [{:name=>:target}, {:name=>:req2}],
+    :optionals => [{:name=>:opt1},{:name=>:opt2}],
+    :options => { :the_volume => {}, :mood => {} },    
+    :splat => {:minimum => 1, :name=>:splat}
   }
-  def bark request
-    @out.puts "barking"
+  def bark target, req2, opt1, opt2, splat, opts
+    out = Hipe::Cli::Io::GoldenHammer.new
+    out.puts "barking"
+    out[:target] = target
+    out
   end
 end
 

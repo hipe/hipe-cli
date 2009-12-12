@@ -12,7 +12,7 @@ require 'ruby-debug'
 
 
 Rcov::RcovTask.new do |t|
-  t.test_files = FileList['spec/*_spec.rb']
+  t.test_files = FileList['spec/spec_*.rb']
   t.verbose = true     # uncomment to see the executed command
   t.rcov_opts = ['--exclude', 'spec,/Library/Ruby/Gems/1.8/gems']
 end
@@ -26,7 +26,7 @@ task :bacon do
   require 'matrix'
 
   PROJECT_SPECS = FileList[
-    'spec/help_spec.rb'
+    'spec/spec_*.rb'
   ]
 
   specs = PROJECT_SPECS
@@ -46,7 +46,8 @@ task :bacon do
   specs.each_with_index do |spec, idx|
     print(left_format % [idx + 1, specs_size, spec])
 
-    Open3.popen3(RUBY, '-I', load_path, spec) do |sin, sout, serr|
+    # Open3.popen3(RUBY, '-I', load_path, spec) do |sin, sout, serr|
+    Open3.popen3('bacon','-I', load_path, spec) do |sin, sout, serr|
       out = sout.read.strip
       err = serr.read.strip
 
@@ -59,20 +60,13 @@ task :bacon do
         puts(yellow % ("%6s %s" % ['', $1]))
       else
         total = nil
-
-debugger
         out.each_line do |line|
-          
-          #debugger
-          
-          #scanned = line.scanf(spec_format)
-          #
-          #next unless scanned.size == 4
-          #
-          #total = Vector[*scanned]
-          #break
+          scanned = line.scanf(spec_format)
+          #puts line
+          next unless scanned.size == 4
+          total = Vector[*scanned]
+          break
         end
-
         if total
           totals += total
           tests, assertions, failures, errors = total_array = total.to_a

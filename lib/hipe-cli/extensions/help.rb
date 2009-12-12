@@ -1,77 +1,69 @@
-require 'hipe-core/asciitypesetting'
+gem 'hipe-core', '=0.0.1'
+require 'hipe-core/ascii-typesetting'
+require 'hipe-core/lingual'
 
 module Hipe
   module Cli
-
-    # @todo i couldn't figure out how to actually ..
-    def self.recursive_brackets list, left, right
-      return '' if list.size == 0  # not the official base case.  just being cautius
-      ret = list[0]
-      if list.size > 1
-        ret += left + recursive_brackets(list.slice(1,list.size-1), left, right) + right
-      end
-      ret
-    end
-
     module Library
-      module Elements # a request object gets extended with this and returned
-        class HelpRequest
-          include Executable
-          def initialize(request);
-            @request = request
-          end
+      module Elements
+        class HelpRequest < RequestHash
+          include Hipe::AsciiTypesetting, Hipe::Cli::Lingual
+          #include Hipe::AsciiTypesetting::Methods
           def execute! app
-            @cli, @out, @command, @screen = app.cli, app.cli.out, @request[:COMMAND_NAME], app.cli.screen
-            @command_object = @cli.commands[@command ? @command.gsub('-','_').to_sym : '']
-            if @command.nil? then execute_app_help_page
-            elsif @command_object.nil? then execute_help_on_invalid_command
+            @cli = app.cli
+            @out = @cli.out
+            @command = self[:COMMAND_NAME]
+            @screen = @cli.screen
+            if @command.nil? then return execute_app_help_page end      
+            
+            if @command.include? ':'
+              this,that = Hipe::Cli::Plugins.split_command(@command)
+              if (plugin = @cli.plugins[this])
+                return plugin.cli.run(['help',that])
+              end
+            end
+            # even if the command was pluginy but invalid, we let it fall thru
+            
+            @command_object = @cli.commands.has_alias?(self[:COMMAND_NAME]) ?
+               @cli.commands[self[:COMMAND_NAME]] : nil
+            if @command_object.nil? then return execute_help_on_invalid_command
             else @out << @command_object.help_page(@cli) end
+            @out
           end
           def execute_app_help_page
             left = %{usage: #{@cli.invocation_name} }
-            right = Hipe::AsciiTypesetting::FormattableString.new(@cli.full_inner_syntax)
+            right = FormattableString.new(@cli.full_inner_syntax)
             @out << left
             @out.puts right.word_wrap_once!(@screen[:width]-left.size) # @todo bug when...
             @out.puts right.word_wrap!(@screen[:width]-left.length).indent!(left.length)
-            # for second line, if it has a description (and maybe a version) , go
+            # for second line, if it has a description (and maybe a version), go
             if (line = @cli.description)
               if (@cli.commands[:version])
-                version_number = ( @cli.commands[:version] << ['--bare'] ).execute!( @cli.sub_buffer )
+                version_number = @cli.commands[:version] << ['--bare']
                 line << %{ version #{version_number}}
               end
               @out.puts line
             end
-            size = @cli.commands.size + @cli.plugins.size
-            sp = Hipe::Lingual.en{sp(np(adjp('Available'),'subcommand',size))}
+            size = @cli.commands.size #@TODO @fixme
+            sp = lingual.en{sp(np(adjp('Available'),'subcommand',size))}
             sp.np.say_count = false
-            @out.puts %{#{sp.say.gsub(/\.?$/,'')}:}
-            list_commands @cli.commands
-            @cli.plugins.each do |x,y|
-              @out.puts "\n"
-              begin
-                cli = y.dereference.cli
-                @out.puts cli.qualified_name + (cli.description ? %{ - #{cli.description}} : '')
-                list_commands cli.commands
-              rescue Hipe::Cli::PluginNotFoundException => e
-                @out.<< %{(plugin "#{y.plugin_name}" not found)}
+            @out.puts %{#{sp.say.gsub(/\.$/,'')}:}
+            prefix_name = @cli.command_prefix
+            @cli.commands.each do |key,command|
+              if (command.cli.command_prefix != prefix_name)
+                _cli = command.cli
+                @out.puts "\n"
+                @out.puts _cli.qualified_name +  (_cli.description ? %{ - #{_cli.description}} : '')
+                prefix_name = _cli.command_prefix
               end
+              @out.puts command.oneline(@screen)
             end
-            @out.puts %{\nSee "#{@cli.invocation_name} help COMMAND" for more information on a specific command.}
+            @out.puts %{\nSee "#{@cli.invocation_name} help COMMAND" }+
+              %{for more information on a specific command.}
           end
-
-          def list_commands(commands)
-            commands.each{|x,y| @out.puts y.oneline(@screen) }
-          end
-
           def execute_help_on_invalid_command
-            hacko = [@command]
-            if (plugin = @cli.plugins.plugin_for_argv(hacko))
-              hacky = ['help', hacko[0]]
-              plugin.cli << hacky
-            else
-              @out.puts %{#{@cli.invocation_name}: Sorry, there is no "#{@command}" command. }+
-              %{See "#{@cli.invocation_name} --#{@cli.commands[:help].long_name}"};
-            end
+            @out.puts %{#{@cli.invocation_name}: Sorry, there is no "#{@command}" command. }+
+            %{See "#{@cli.invocation_name} --#{@cli.commands[:help].long_name}"};
           end
         end
       end
@@ -91,18 +83,24 @@ module Hipe
         @parent ? %{#{@parent.invocation_name} #{plugin_name}} : invocation_name
       end
 
-      # to do git-like indentation we need everything that follows the app name separately
       def full_inner_syntax
-        #@todo for the next refactor.
+        #@todo for the next refactor:
         # Options are like commands that take zero or one argument and can appear multiple times.
-        arr = @commands.select{|k,v| v.short_name_long_name_syntax }.map{|x| x[1].short_name_long_name_syntax}
+        select = lambda{|k,v| v.short_name_long_name_syntax }
+        map    = lambda{|x| x[1].short_name_long_name_syntax}
+        begin
+          arr = commands.select(&select).map(&map).uniq
+        rescue Hipe::Cli::Exceptions::PluginNotFound => e
+          arr = commands.local.select(&select).map(&map).uniq
+          arr.unshift "(PLUGIN ERROR)"
+        end
         app_opts = arr.size > 0 ? %{#{arr * ' '} } : ''
         %{#{app_opts}COMMAND [OPTIONS] [REQUIRED_ARGS] [OPTIONAL_ARGS]}
       end
     end
 
     class Option
-
+      include Hipe::AsciiTypesetting::Methods
       def full_outer_syntax
         %{[#{full_inner_syntax}]}
       end
@@ -116,7 +114,7 @@ module Hipe
         if short_name
           sn = %{-#{short_name}}
           if @type == :increment
-            short_and_long << Hipe::Cli.recursive_brackets([sn,sn,'...'],'[',']')
+            short_and_long << recursive_brackets([sn,sn,'...'],'[',']')
           else
             short_and_long << %{#{sn}#{appends[0]}}
           end
@@ -128,12 +126,15 @@ module Hipe
       end
     end
 
+    class Command
+      include Hipe::AsciiTypesetting::Methods
+    end
     module CommandLike
       def cli= cli # for now just for
         @cli = cli
       end
       def oneline screen
-        first_col = sprintf(%{%-#{screen[:col1width]}s},%{#{' '*screen[:margin]}#{invocation_name}})
+        first_col = sprintf(%{%-#{screen[:col1width]}s},%{#{' '*screen[:margin]}#{full_name}})
         # we won't deal with what if it's too long yet @todo
         desc = description || '[no description]'
         second_col = Hipe::AsciiTypesetting::FormattableString.new(desc).sentence_wrap_once!(screen[:col2width])
@@ -156,17 +157,17 @@ module Hipe
       def help_page cli
         el = Element.new
         screen = cli.screen
-        out = Hipe::BufferString.new
+        out = Hipe::Io::BufferString.new
         out.puts name.to_s + (description ? %{ - #{description}} : '') + "\n\n"
-        out.puts "usage: #{cli.invocation_name} #{invocation_name} #{full_inner_syntax}\n\n"
+        out.puts "usage: #{cli.invocation_name} #{full_name} #{full_inner_syntax}\n\n"
         col1width,col2width = screen[:col1width], screen[:col2width]
         margie = ' '*screen[:margin]
         min_width = [0, screen[:col1width] - screen[:margin] * 2 ].max
         format = %{#{margie}%-#{min_width}s#{margie}} # for first column
         els = []
-        els += @options.map{|k,v| [v.full_inner_syntax, v.description]}
-        els += @required.map{|v|  el.flyweight(v); [el.name, el.description] }
-        els += @optionals.map{|v| el.flyweight(v); [el.name, el.description] }
+        els += options.map{|k,v| [v.full_inner_syntax, v.description]}
+        els += required.map{|v|  el.flyweight(v); [el.name, el.description] }
+        els += optionals.map{|v| el.flyweight(v); [el.name, el.description] }
         els.each do |pair|
           line = sprintf(format,pair[0])
           out << line
@@ -185,17 +186,19 @@ module Hipe
       def full_inner_syntax
         el = Element.new
         elements = []
-        elements += @options.map{|k,v| v.full_outer_syntax }
-        elements += @required.map{|el_data| el.flyweight(el_data).name }
-        names    = @optionals.map{|el_data| el.flyweight(el_data).name }
-        elements += [%{[#{Hipe::Cli.recursive_brackets(names,' [',']')}]}] if @optionals.size > 0
-        el.flyweight(@splat) if @splat
-        elements += ['['+Hipe::Cli.recursive_brackets(Array.new(2,el.name)+['...'],' [',']')+']'] if @splat
+        elements += options.map{|k,v| v.full_outer_syntax }
+        elements += required.map{|el_data| el.flyweight(el_data).name }
+        names    = optionals.map{|el_data| el.flyweight(el_data).name }
+        elements += [%{[#{recursive_brackets(names,' [',']')}]}] if optionals.size > 0
+        el.flyweight(splat) if splat
+        elements += ['['+recursive_brackets(Array.new(2,el.name)+['...'],' [',']')+']'] if splat
         elements * ' '
       end
     end
     module ElementLike
+      include Lingual
 
+      # @fixme -- this kind of stuff must be moved into the predicate classes.
       # @return a string describing this argument or option
       # If the element does not have a description string, one is attempted by
       # describing various validation info.  If a description string is provided,
@@ -203,7 +206,7 @@ module Hipe
       # substituted with sentences describing the predicate @todo offload predicate description
       def description
         replacements = OrderedHash.new
-        replacements[:enum] = Hipe::Lingual::List[@data[:enum]].or{|x| x.to_s} if @data[:enum]
+        replacements[:enum] = lingual.list(@data[:enum]).or{|x| x.to_s} if @data[:enum]
         replacements[:regexp_sentence] = @data[:regexp_sentence] if @data[:regexp_sentence]
         if @data[:range]
           low, hi = @data[:range].begin, @data[:range].end
