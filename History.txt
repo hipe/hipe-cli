@@ -1,3 +1,6 @@
+
+== 0.0.4 
+
 == 0.0.3 
   * beginning of complete overhaul.  100% coverage! ;)
 == 0.0.2

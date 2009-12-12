@@ -8,8 +8,13 @@ require 'ruby-debug'
 #   t.spec_opts = ['--options', "\"#{File.dirname(__FILE__)}/spec/spec.opts\""]
 #   t.spec_files = FileList['spec/public/*_spec.rb'] + FileList['spec/private/**/*_spec.rb']
 # end
-# 
+#
 
+
+desc 'Removes trailing whitespace'
+task :whitespace do
+  sh %{find . -name '*.rb' -exec sed -i '' 's/ *$//g' {} \\;}
+end
 
 Rcov::RcovTask.new do |t|
   t.test_files = FileList['spec/spec_*.rb']
