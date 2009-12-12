@@ -11,7 +11,7 @@ module GemHelpers
       s.required_rubygems_version = Gem::Requirement.new("> 1.3.1") if s.respond_to? :required_rubygems_version=
       s.author    = "Mark Meves"
       s.email     = "mark.meves@gmail.com"
-      s.homepage  = "http://github.com/hipe/hipe-core"
+      s.homepage  = "http://github.com/hipe/hipe-cli"
       s.date      = %q{2009-12-12}  
       s.summary   = %q{beginnings of yet another cli library}  
       s.description  = <<-EOS.strip
@@ -26,9 +26,8 @@ module GemHelpers
 
       s.has_rdoc = false  #*
       #s.extra_rdoc_files = %w[README.rdoc MIT-LICENSE.txt History.txt]
-      s.extra_rdoc_files = %w[LICENSE History.txt]
+      s.extra_rdoc_files = %w[LICENSE History.txt README]
 
-      s.add_dependency "rools", ">= 0.4" # just if you want well formed articles for hipe-core/lingual
     end
   end
 
@@ -49,7 +48,7 @@ module GemHelpers
   end
 
   def read_gemspec
-    @read_gemspec ||= eval(File.read("hipe-core.gemspec"))
+    @read_gemspec ||= eval(File.read("hipe-cli.gemspec"))
   end
 
   def sh(command)
@@ -61,9 +60,9 @@ end
 class Default < Thor
   include GemHelpers
 
-  desc "gemspec", "Regenerate hipe-core.gemspec"
+  desc "gemspec", "Regenerate hipe-cli.gemspec"
   def gemspec
-    File.open("hipe-core.gemspec", "w") do |file|
+    File.open("hipe-cli.gemspec", "w") do |file|
       gemspec_ruby = generate_gemspec.to_ruby
       gemspec_ruby = prettyify_array(gemspec_ruby, :files)
       gemspec_ruby = prettyify_array(gemspec_ruby, :test_files)
@@ -72,13 +71,13 @@ class Default < Thor
       file.write gemspec_ruby
     end
 
-    puts "Wrote gemspec to hipe-core.gemspec"
+    puts "Wrote gemspec to hipe-cli.gemspec"
     read_gemspec.validate
   end
 
-  desc "build", "Build a hipe-core gem"
+  desc "build", "Build a hipe-cli gem"
   def build
-    sh "gem build hipe-core.gemspec"
+    sh "gem build hipe-cli.gemspec"
     FileUtils.mkdir_p "pkg"
     FileUtils.mv read_gemspec.file_name, "pkg"
   end

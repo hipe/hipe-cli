@@ -1,4 +1,4 @@
-== 0.0.2 / 2009-12-12
+== 0.0.1 / 2009-12-12
  * existing code cleaned up for 0.0.2 changes
  * passes all tests, 89% coverage
 == 0.0.0 / 2009-11-19
