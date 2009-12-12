@@ -1,5 +1,5 @@
-== 0.0.3 - IN PROGRESS
-  * complete overhaul to use optparse
+== 0.0.3 
+  * beginning of complete overhaul.  100% coverage! ;)
 == 0.0.2
  * confusion
 == 0.0.1 / 2009-12-12
