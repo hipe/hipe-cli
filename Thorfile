@@ -6,7 +6,7 @@ module GemHelpers
     require 'hipe-cli'
     
     Gem::Specification.new do |s|    
-      s.name      = 'hipe-core'
+      s.name      = 'hipe-cli'
       s.version   = Hipe::Cli::VERSION
       s.required_rubygems_version = Gem::Requirement.new("> 1.3.1") if s.respond_to? :required_rubygems_version=
       s.author    = "Mark Meves"
