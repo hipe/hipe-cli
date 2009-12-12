@@ -1,3 +1,7 @@
+== 0.0.3 - IN PROGRESS
+  * complete overhaul to use optparse
+== 0.0.2
+ * confusion
 == 0.0.1 / 2009-12-12
  * existing code cleaned up for 0.0.2 changes
  * passes all tests, 89% coverage
