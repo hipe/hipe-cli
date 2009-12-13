@@ -37,6 +37,9 @@ module Hipe
       def does name, *list, &block
         @commands.add(name, *list, &block)
       end
+      def run argv
+        @commands[argv.shift].run(argv)
+      end
     end
     class Commands < OrderedHash
       attr_reader :aliases
@@ -128,6 +131,12 @@ module Hipe
         end
       end
     end
+    class Recording
+      attr_reader :args, :block, :method_symbol
+      def method_missing(mid, *args, &block)
+        @method_symbol, @args, @block = mid, args, block
+      end
+    end
     class Command
       include CommandElement
       def initialize(names, &block)
@@ -142,17 +151,25 @@ module Hipe
         @opt_parse_args = []
         self.instance_eval(&@block)
         args_for_implementer = []
+        @options = nil
         if (@opt_parse_args.size > 0)
           opt_values = OptionValues.new
           opts = OptionParser.new do |opts|
+            @options = opts 
             @opt_parse_args.each do |arr|
-              tree = OptParsey.parse_grammar(arr[0],*arr[1])
-              use_name = tree.use_name
-              opts.on(arr[0],*arr[1]) do |x|
-                opt_values[use_name] = arr[2] ? arr[2].call(x) : x
+              if Recording === arr
+                debugger
+                opts.send(arr.method_symbol, *arr.args, &arr.block)
+              else
+                tree = OptParsey.parse_grammar(arr[0],*arr[1])
+                use_name = tree.use_name
+                opts.on(arr[0],*arr[1]) do |x|
+                  opt_values[use_name] = arr[2] ? arr[2].call(x) : x
+                end
               end
             end
           end
+          debugger          
           opts.parse!(argv)
           args_for_implementer << opt_values
         end
@@ -161,9 +178,13 @@ module Hipe
       def option(name,*list,&block)
         @opt_parse_args << [name,list,block]
       end
-      def required; end
-      def optional; end
-      def splat; end
+      def opts
+        @opt_parse_args << rec = Recording.new
+        rec
+      end
+      def options
+        @options
+      end
       def run_with_application(argv)
         @app_instance.send(name.to_s.gsub('-','_'), *argv)
       end
