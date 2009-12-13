@@ -131,12 +131,6 @@ module Hipe
         end
       end
     end
-    class Recording
-      attr_reader :args, :block, :method_symbol
-      def method_missing(mid, *args, &block)
-        @method_symbol, @args, @block = mid, args, block
-      end
-    end
     class Command
       include CommandElement
       def initialize(names, &block)
@@ -148,43 +142,28 @@ module Hipe
       end
       def run(argv)
         return run_with_application(argv) unless @block
-        @opt_parse_args = []
-        self.instance_eval(&@block)
         args_for_implementer = []
-        @options = nil
-        if (@opt_parse_args.size > 0)
-          opt_values = OptionValues.new
-          opts = OptionParser.new do |opts|
-            @options = opts 
-            @opt_parse_args.each do |arr|
-              if Recording === arr
-                debugger
-                opts.send(arr.method_symbol, *arr.args, &arr.block)
-              else
-                tree = OptParsey.parse_grammar(arr[0],*arr[1])
-                use_name = tree.use_name
-                opts.on(arr[0],*arr[1]) do |x|
-                  opt_values[use_name] = arr[2] ? arr[2].call(x) : x
-                end
-              end
+        opt_values = OptionValues.new
+        opts = OptionParser.new do |opts|
+          @opts = opts     
+          @opt_parse_args = []     
+          self.instance_eval(&@block)
+          @opt_parse_args.each do |opt|
+            tree = OptParsey.parse_grammar(opt[0],*opt[1])
+            use_name = tree.use_name
+            opts.on(opt[0],*opt[1]) do |x|
+              opt_values[use_name] = opt[2] ? opt[2].call(x) : x  # this is the most important line of the thing
             end
           end
-          debugger          
-          opts.parse!(argv)
-          args_for_implementer << opt_values
         end
+        rs = opts.parse!(argv)
+        args_for_implementer << opt_values
         run_with_application(args_for_implementer)
       end
       def option(name,*list,&block)
         @opt_parse_args << [name,list,block]
       end
-      def opts
-        @opt_parse_args << rec = Recording.new
-        rec
-      end
-      def options
-        @options
-      end
+      def opts; @opts; end
       def run_with_application(argv)
         @app_instance.send(name.to_s.gsub('-','_'), *argv)
       end
