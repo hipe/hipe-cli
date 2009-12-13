@@ -30,12 +30,13 @@ describe App3 do
     App3.cli.should.not == App2.cli
   end
 
-    it "should be able to create instances that have a cli (b5)" do
-    app3 = App3.new
-    app3.cli.should.be.kind_of Hipe::Cli::Cli
+  it "should be able to create instances that have a cli (b5)" do
+    @app3 = App3.new
+    @app3.cli.should.be.kind_of Hipe::Cli::Cli
   end
 
-  skipit "should have instances with different cli instances than the class (b6)" do
-
+  it "should have instances with different cli instances than the class (b6)" do
+    (@app3.cli.equal? App3.cli).should == false
+    (@app3.cli.equal? @app3.cli).should == true
   end
 end
