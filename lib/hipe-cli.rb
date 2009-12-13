@@ -1,7 +1,9 @@
 require 'orderedhash'
+require 'ostruct'
 module Hipe
   module Cli
     VERSION = '0.0.4'
+    DIR = File.expand_path('../../',__FILE__) # for examples run from tests :/
     AppClasses = {}
     def self.included klass
       cli = Cli.new(klass)
@@ -18,103 +20,162 @@ module Hipe
       end
     end
     class Cli
-      attr_reader :commands # debugging
+      attr_reader :commands
       def initialize(klass)
         @app_class = klass
         @commands = Commands.new
       end
       def dup_for_app_instance(instance)
         spawn = self.dup
-        spawn.instance_variable_set('@app_instance',instance)
+        spawn.init_for_app_instance(instance)
         spawn
+      end
+      def init_for_app_instance(instance)
+        @commands = @commands.dup
+        @commands.app_instance = instance
       end
       def does name, *list, &block
         @commands.add(name, *list, &block)
       end
     end
     class Commands < OrderedHash
-      attr_accessor :aliases
+      attr_reader :aliases
+      attr_writer :app_instance
       def initialize
         super()
+        @app_instance = nil
         @aliases = {}
       end
       def add(name, *list, &block)
         command = CommandFactory.command_factory(name, *list, &block)
-        name_s = command.name.to_s
+        name_str = command.name.to_s;
         command.aliases.each do |aliaz|
           raise Exception.f(%{For now we can't redefine commands ("#{aliaz}")}) if @aliases[aliaz]
-          @aliases[aliaz] = name_s
+          @aliases[aliaz] = name_str
         end
-        set name_s, command
+        self[name_str] = command
       end
-      alias_method :get, :[]
       def [](aliaz)
-        return get @aliases[aliaz]
+        if (cmd = super(@aliases[aliaz.to_s]))
+          cmd.app_instance = @app_instance
+          cmd
+        end
       end
-      protected
-      alias_method :set, :[]=
-      def []=(x,y); super(x,y) end
+      protected :[]=
     end
     module CommandFactory
       def self.command_factory(name, *list, &block)
-        case name
-        when Symbol
-          use_name = name
-        when String
-          if md = /^--([-_a-z0-9]+)/i.match(name)
-            long_name = md[1]
-          elsif md = /^-([a-z0-9])$/i.match(name)
-            short_name = md[1]
-            if list.size>0 and md = /^--([-a-z0-9]+.*)$/.match(list[0])
-              long_name = md[1]
-            else
-              use_name = short_name
-            end
-          else
-            use_name = name
-          end
+        o = OptParsey.parse_grammar(name,*list)
+        if (o.short_name || o.long_name)
+          OptionLikeCommand.new(o, &block)
         else
-          raise Exception.f(%{bad type for name: #{name.class}},:type=>:grammar_grammar)
-        end
-        cursor = 0 + ((short_name && long_name) ? 1 : 0)
-        description = list[cursor] if (list[cursor])
-        if (short_name || long_name)
-          return OptionLikeCommand.new(short_name, long_name, description, &block)
-        else
-          return Command.new(use_name, description, &block)
+          Command.new(o, &block)
         end
       end
     end
     module CommandElement
-      attr_reader :name, :description
+      attr_reader :description
+      attr_accessor :app_instance
+      def take_names(o)
+        o.instance_variable_get('@table').each do |name,value|
+          instance_variable_set(%{@#{name}}, value)
+        end
+      end
+      def name; @use_name end
     end
     module OptParsey
-
+      LONG_NAME_WITHOUT_ARGS = /^--([-_a-z0-9]+)/i
+      def self.parse_grammar(name,*list)
+        o = OpenStruct.new()
+        if (Symbol===name)
+          o.use_name = name
+        elsif (String===name)
+          if md = LONG_NAME_WITHOUT_ARGS.match(name)
+            o.long_name = md[1]
+            o.use_name = o.long_name
+          elsif md = /^-([a-z0-9])$/i.match(name)
+            o.short_name = md[1]
+            if list.size>0 and md = LONG_NAME_WITHOUT_ARGS.match(list[0])
+              o.long_name = md[1]
+            end
+            o.use_name = (o.long_name || o.short_name).downcase.gsub('-','_').to_sym
+          else
+            o.use_name = name
+          end
+        else
+          raise Exception.f(%{bad type for name: #{name.class}},:type=>:grammar_grammar)
+        end
+        if (idx = list.find_index{|x| String===x and /^[^-]/ =~ x  })
+          o.description = list[idx]
+        end
+        o
+      end
+    end
+    class OptionValues < OrderedHash
+      def initialize
+        super()
+        @changed_to_array = {}
+      end
+      def []=(x,y)
+        if (has_key?(x))
+          unless (@changed_to_array[x])
+            super(x,[self[x]])
+            @changed_to_array[x] = true
+          end
+          self[x] << y
+        else
+          super(x,y)
+        end
+      end
     end
     class Command
       include CommandElement
-      def initialize(name, description, &block)
-        @name, @description, @block = name,description, block
+      def initialize(names, &block)
+        @block = block
+        take_names(names)
       end
       def aliases
-        [@name.to_s]
+        [@use_name.to_s]
+      end
+      def run(argv)
+        return run_with_application(argv) unless @block
+        @opt_parse_args = []
+        self.instance_eval(&@block)
+        args_for_implementer = []
+        if (@opt_parse_args.size > 0)
+          opt_values = OptionValues.new
+          opts = OptionParser.new do |opts|
+            @opt_parse_args.each do |arr|
+              tree = OptParsey.parse_grammar(arr[0],*arr[1])
+              use_name = tree.use_name
+              opts.on(arr[0],*arr[1]) do |x|
+                opt_values[use_name] = arr[2] ? arr[2].call(x) : x
+              end
+            end
+          end
+          opts.parse!(argv)
+          args_for_implementer << opt_values
+        end
+        run_with_application(args_for_implementer)
+      end
+      def option(name,*list,&block)
+        @opt_parse_args << [name,list,block]
+      end
+      def required; end
+      def optional; end
+      def splat; end
+      def run_with_application(argv)
+        @app_instance.send(name.to_s.gsub('-','_'), *argv)
       end
     end
     class OptionLikeCommand < Command
       include CommandElement, OptParsey
-      def initialize(short_name, long_name, desc, &block)
-        @short_name, @description, @block = short_name, desc, block
-        if long_name
-          @name = /^[-_a-z0-9]+/i.match(long_name)[0]
-          @long_name_with_syntax = long_name
-          @long_name = @name
-          @name = @long_name
-        else
-          @name = @short_name
-        end
+      def initialize(o, &block)
+        take_names(o)
+        @block = block
       end
       def aliases
-        [@name,@short_name ? %{-#{@short_name}} : nil,@long_name ? %{--#{@long_name}} : nil].compact
+        [@use_name.to_s, @short_name ? %{-#{@short_name}} : nil,@long_name ? %{--#{@long_name}} : nil].compact
       end
     end
     class Exception < ::Exception

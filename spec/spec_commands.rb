@@ -2,9 +2,9 @@
 require File.expand_path('../bacon-helper', __FILE__)
 
 class AppC1
-  include Hipe::Cli
-  cli.does :foo
-  def foo; end
+   include Hipe::Cli
+   cli.does :foo
+   def foo; end
 end
 
 describe AppC1 do
