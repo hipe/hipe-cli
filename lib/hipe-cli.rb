@@ -145,12 +145,11 @@ module Hipe
         args_for_implementer = []
         opt_values = OptionValues.new
         opts = OptionParser.new do |opts|
-          @opts = opts     
-          @opt_parse_args = []     
+          @opts = opts
+          @opt_parse_args = []
           self.instance_eval(&@block)
           @opt_parse_args.each do |opt|
-            tree = OptParsey.parse_grammar(opt[0],*opt[1])
-            use_name = tree.use_name
+            use_name = OptParsey.parse_grammar(opt[0],*opt[1]).use_name
             opts.on(opt[0],*opt[1]) do |x|
               opt_values[use_name] = opt[2] ? opt[2].call(x) : x  # this is the most important line of the thing
             end
