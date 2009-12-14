@@ -4,7 +4,7 @@
   * defaults
   * bugfix release for hipe-core
   * output buffering (and golden hammer)
-== 0.0.4 is now:
+== 0.0.4 / 2009-10-14
   * need to figure out how to handle exceptions on syntax errors (sort of)
   * using optparse to display help screen for the application 
   * 98% test coverage
