@@ -13,8 +13,12 @@ class AppOp2
     option('-h') do |x|
       opts.to_s
     end
+    option('B', 'blah blbah') do |x|
+      "we got b: #{x}"
+    end
   end
   def go(opts)
+    debugger
     if opts[:h]
       opts[:h]
     else

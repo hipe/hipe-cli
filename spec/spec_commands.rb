@@ -25,7 +25,7 @@ describe AppC2 do
   it "should be able to create optionlike commands (c2)" do
     AppC2.cli.commands.size.should.equal 1
     AppC2.cli.commands.keys.should.equal ["bar"]
-    AppC2.cli.commands["bar"].should.be.kind_of Hipe::Cli::OptParsey
+    AppC2.cli.commands["bar"].should.be.kind_of Hipe::Cli::OptionLikeCommand
   end
 end
 

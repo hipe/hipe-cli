@@ -26,3 +26,10 @@ describe AppOp1 do
   end
 
 end
+
+class AppOp5
+  include Hipe::Cli
+
+
+
+end

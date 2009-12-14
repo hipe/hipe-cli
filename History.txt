@@ -1,6 +1,11 @@
-
-== 0.0.4 
-
+== 0.0.5 or above will be: 
+  * splat
+== 0.0.4 OR ABOVE WILL BE:
+  * need to figure out how to handle exceptions on syntax errors
+  * using optparse to display help screen for the application !
+  * 100% test coverage!  
+== 0.0.4 is now:
+  * using optparse for required and optional arguments, (not just options) too. !
 == 0.0.3 
   * beginning of complete overhaul.  100% coverage! ;)
 == 0.0.2
