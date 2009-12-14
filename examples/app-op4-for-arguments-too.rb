@@ -7,7 +7,6 @@ require 'optparse/time'
 class AppOp4
   include Hipe::Cli
   cli.does(:go) do
-    #option('-a', '--age[NUMBER]', 'some age of yours'){ |x| %{yer age:"#{x}"} }
     option('-h', '--help', 'you guessed it'){|x| puts opts; exit }
     option('-a',  '--an-option BLAH', 'some whatever option')
     required 'MOVIE', 'your favorite movie'

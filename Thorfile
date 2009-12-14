@@ -14,6 +14,7 @@ module GemHelpers
       s.homepage  = "http://github.com/hipe/hipe-cli"
       s.date      = %q{2009-12-12}  
       s.summary   = %q{beginnings of yet another cli library}  
+      s.executables = ['hipe-cli']      
       s.description  = <<-EOS.strip
       yet another take on cli
       EOS
@@ -26,7 +27,7 @@ module GemHelpers
 
       s.has_rdoc = false  #*
       #s.extra_rdoc_files = %w[README.rdoc MIT-LICENSE.txt History.txt]
-      s.extra_rdoc_files = %w[LICENSE History.txt README]
+      s.extra_rdoc_files = %w[LICENSE History.txt]
 
     end
   end

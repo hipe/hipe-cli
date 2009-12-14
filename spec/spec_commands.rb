@@ -11,7 +11,7 @@ describe AppC1 do
   it "should know the name and size of its commands (c1)" do
     AppC1.cli.commands.size.should.equal 1
     AppC1.cli.commands.keys.should.equal ["foo"]
-    AppC1.cli.commands['foo'].name.should.equal :foo
+    AppC1.cli.commands['foo'].main_name.should.equal :foo
   end
 end
 
@@ -58,14 +58,24 @@ describe AppC3 do
     AppC3.cli.commands['s'].description.should.equal 'short name only'
   end
 
-  it "should throw on bad command name (c6)" do
+  it "should raise on bad command name (c6)" do
     e = lambda {
       AppC3.cli.commands.add(777)
     }.should.raise Hipe::Cli::GrammarGrammarException
     e.message.should.match(/bad type for.*name.*Fixnum/i)
   end
+
 end
 
+class AppC7
+ include Hipe::Cli
+  cli.does :foo
+end
 
+describe AppC7 do
+  it "should (c7)" do
+    lambda{ AppC7.new.cli.run(['foo']) }.should.raise(Hipe::Cli::GrammarGrammarException)
+  end
+end
 
 

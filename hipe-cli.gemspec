@@ -2,15 +2,15 @@
 
 Gem::Specification.new do |s|
   s.name = %q{hipe-cli}
-  s.version = "0.0.1"
+  s.version = "0.0.4"
 
   s.required_rubygems_version = Gem::Requirement.new("> 1.3.1") if s.respond_to? :required_rubygems_version=
   s.authors = ["Mark Meves"]
-  s.date = %q{2009-11-19}
-  s.description = %q{hipe-cli is an experimental command-line "framework" that aides
-      in parsing commands and options and displaying and formatting
-      help screens, etc.}
+  s.date = %q{2009-12-12}
+  s.default_executable = %q{hipe-cli}
+  s.description = %q{yet another take on cli}
   s.email = %q{mark.meves@gmail.com}
+  s.executables = ["hipe-cli"]
   s.extra_rdoc_files = [
     "LICENSE",
     "History.txt"
@@ -21,45 +21,28 @@ Gem::Specification.new do |s|
     "LICENSE",
     "Rakefile.rb",
     "Thorfile",
+    "examples/app-op2-simple-help.rb",
+    "examples/app-op3-big-op-example.rb",
+    "examples/app-op4-for-arguments-too.rb",
+    "hipe-cli.gemspec",
     "lib/hipe-cli.rb",
-    "lib/hipe-cli/app.rb",
-    "lib/hipe-cli/asciitypesetter.rb",
-    "lib/hipe-cli/commands/help.rb",
-    "lib/hipe-cli/logger.rb",
-    "lib/hipe-cli/options/debug.rb",
-    "lib/hipe-cli/options/help.rb",
-    "lib/hipe-cli/predicates/gets_opened.rb",
-    "lib/hipe-cli/predicates/is_jsonesque.rb",
-    "lib/hipe-cli/predicates/must_exist.rb",
-    "lib/hipe-cli/predicates/must_match_regex.rb",
-    "spec/argv.rb",
-    "spec/basics_spec.rb",
-    "spec/fakes/plugind.rb",
-    "spec/fakes/some-plugin-empty.rb",
-    "spec/fakes/some-plugin.rb",
-    "spec/fixtures/dummy-file-2.txt",
-    "spec/fixtures/dummy-file.txt",
-    "spec/spec.opts",
-    "spec/FOCUS.rb",
-    "spec/plugin_speg.rb",
-    "spec/test-strap.rb",
-    "spec/validations_speg.rb"
+    "spec/bacon-helper.rb",
+    "spec/spec_basics.rb",
+    "spec/spec_commands.rb",
+    "spec/spec_grammar-grammar.rb",
+    "spec/spec_optparsey.rb",
+    "bin/hipe-cli"
   ]
-  s.has_rdoc = false
   s.homepage = %q{http://github.com/hipe/hipe-cli}
   s.require_paths = ["lib"]
   s.rubygems_version = %q{1.3.5}
-  s.summary = %q{Getopt plus validations and help screen generation}
+  s.summary = %q{beginnings of yet another cli library}
   s.test_files = [
-    "spec/FOCUS.rb",
-    "spec/argv.rb",
-    "spec/basics_spec.rb",
-    "spec/fakes/plugind.rb",
-    "spec/fakes/some-plugin-empty.rb",
-    "spec/fakes/some-plugin.rb",
-    "spec/plugin_speg.rb",
-    "spec/test-strap.rb",
-    "spec/validations_speg.rb"
+    "spec/bacon-helper.rb",
+    "spec/spec_basics.rb",
+    "spec/spec_commands.rb",
+    "spec/spec_grammar-grammar.rb",
+    "spec/spec_optparsey.rb"
   ]
 
   if s.respond_to? :specification_version then

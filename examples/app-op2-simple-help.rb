@@ -6,19 +6,13 @@ require 'optparse/time'
 
 class AppOp2
   include Hipe::Cli
+  # cli.does(:help)
+  cli.does(:run)
   cli.does(:go) do
-    option('-d', '--decibles[BLAH]') do |x|
-      %{dB:"#{x}"}
-    end
-    option('-h') do |x|
-      opts.to_s
-    end
-    option('B', 'blah blbah') do |x|
-      "we got b: #{x}"
-    end
+    option('-d', '--decibles[BLAH]'){ |x| %{dB:"#{x}"} }
+    option('-h'){ |x| puts opts; exit }
   end
   def go(opts)
-    debugger
     if opts[:h]
       opts[:h]
     else

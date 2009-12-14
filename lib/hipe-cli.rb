@@ -240,65 +240,69 @@ module Hipe
       end
       def run(argv)
         return run_with_application(argv) unless @block #if there is no definition block we pass the args raw
-        opt_values = OptionValues.new     # is in scope below for switches to write their results to
-        switches = {                      # hold on to each switch that OptParser builds
-          OptParseSwitch=>[], PositionalArgument=>[],
-          RequiredPositional=>[], OptionalPositional=>[],
-          Splat=>[]  #never more than one element in here
-        }
-        opts = OptionParser.new do |opts| # build all the switches for options, required, optionals, splat in one go
-          @option_parser = opts           # is made available thru opts() so definitions can e.g. opts.separator()
-          @definitions = []               # gets populated in the next line
-          self.instance_eval(&@block)     # runs all the option(), required(), optional(), splat() definitions
-          @definitions.each do |my_info|  # with each one of those definition we 'recoreded' ...
-            first_arg = my_info.first_arg
-            unless /^-/ =~ first_arg
-              first_arg = %{--#{first_arg} VALUE} # positional arguments will need proper names and parameters
-            end                           # only for their construction (hack alert!)
-            switch = opts.define(first_arg,*my_info.list,&my_info.block) # make an optional, required, option, etc.
-            switch.extend my_info.hipe_type
-            switch.hipe_type = my_info.hipe_type
-            switches[switch.hipe_type] << switch
-            if (PositionalArgument===switch)
-              switches[PositionalArgument] << switch  # like an abstract base class. never the actual hipe_type
-            end
-            switch.init_as_hipe_type
-            orig_block = switch.block
-            new_block = Proc.new() do |x|
-              if (orig_block)
-                result_from_original = orig_block.call(x)
-                opt_values[switch.main_name] = result_from_original
-              else
-                opt_values[switch.main_name] = x
+        @prev = nil
+        ret = catch(:interrupt) do
+          opt_values = OptionValues.new     # is in scope below for switches to write their results to
+          switches = {                      # hold on to each switch that OptParser builds
+            OptParseSwitch=>[], PositionalArgument=>[],
+            RequiredPositional=>[], OptionalPositional=>[],
+            Splat=>[]  #never more than one element in here
+          }
+          opts = OptionParser.new do |opts| # build all the switches for options, required, optionals, splat in one go
+            @option_parser = opts           # is made available thru opts() so definitions can e.g. opts.separator()
+            @definitions = []               # gets populated in the next line
+            self.instance_eval(&@block)     # runs all the option(), required(), optional(), splat() definitions
+            @definitions.each do |my_info|  # with each one of those definition we 'recoreded' ...
+              first_arg = my_info.first_arg
+              unless /^-/ =~ first_arg
+                first_arg = %{--#{first_arg} VALUE} # positional arguments will need proper names and parameters
+              end                           # only for their construction (hack alert!)
+              switch = opts.define(first_arg,*my_info.list,&my_info.block) # make an optional, required, option, etc.
+              switch.extend my_info.hipe_type
+              switch.hipe_type = my_info.hipe_type
+              switches[switch.hipe_type] << switch
+              if (PositionalArgument===switch)
+                switches[PositionalArgument] << switch  # like an abstract base class. never the actual hipe_type
               end
+              switch.init_as_hipe_type
+              orig_block = switch.block
+              new_block = Proc.new() do |x|
+                if (orig_block)
+                  result_from_original = orig_block.call(x)
+                  opt_values[switch.main_name] = result_from_original
+                else
+                  opt_values[switch.main_name] = x
+                end
+              end
+              switch.instance_variable_set('@block',new_block)
             end
-            switch.instance_variable_set('@block',new_block)
           end
+
+          # parse any options (as oppposed to arguments) in the grammar
+          if (switches[OptParseSwitch].size > 0)
+            opts.parse!(argv)  # result equal? argv is always true probably
+          end
+
+          switches[PositionalArgument].each{|x| x.prepare_for_parse } #awful hack! if they request help
+
+          # iterate over the remaining required and optional arguments...
+          if (switches[PositionalArgument].size > 0)
+            new_argv = treeify_argv(switches[PositionalArgument], argv)
+            opts.parse!(new_argv)
+          end
+
+          # complain about any required arguments that are not in the opt_values
+          provided = opt_values.keys
+          missing = switches[RequiredPositional].select{|x| ! provided.include? x.main_name}
+          error_missing(missing) if missing.size > 0
+
+          # complain if there are any remaining unparsed arguments  #@TODO splat
+          error_needless(argv) if (argv.size > 0)
+
+          args_for_implementer = flatten_args(switches, opt_values)
+          ret = run_with_application(args_for_implementer)
         end
-
-        # parse any options (as oppposed to arguments) in the grammar
-        if (switches[OptParseSwitch].size > 0)
-          opts.parse!(argv)  # result equal? argv is always true probably
-        end
-
-        switches[PositionalArgument].each{|x| x.prepare_for_parse } #awful hack! if they request help
-
-        # iterate over the remaining required and optional arguments...
-        if (switches[PositionalArgument].size > 0)
-          new_argv = treeify_argv(switches[PositionalArgument], argv)
-          opts.parse!(new_argv)
-        end
-
-        # complain about any required arguments that are not in the opt_values
-        provided = opt_values.keys
-        missing = switches[RequiredPositional].select{|x| ! provided.include? x.main_name}
-        error_missing(missing) if missing.size > 0
-
-        # complain if there are any remaining unparsed arguments  #@TODO splat
-        error_needless(argv) if (argv.size > 0)
-
-        args_for_implementer = flatten_args(switches, opt_values)
-        run_with_application(args_for_implementer)
+        ret
       end
       def flatten_args(switches, opt_values)
         arg_array = []
@@ -333,25 +337,14 @@ module Hipe
         e.reason = sp.say
         raise e
       end
-      def categorize_switches(switches)
-        required = []
-        positional = []
-        switches.each do |switch|
-          if (PositionalArgument === switch)
-            switch.add_dashes_and_arg_to_long
-            positional << switch
-            if (RequiredPositional === switch)
-              required << switch
-            end
-          end
-        end
-        return [positional, required]
-      end
       def option   (name,*list,&block); define(%s{options},            OptParseSwitch,     name, list, block) end
       def required (name,*list,&block); define(%s{required arguments}, RequiredPositional, name, list, block) end
       def optional (name,*list,&block); define(%s{optional arguments}, OptionalPositional, name, list, block) end
       def splat    (name,*list,&block); define(%s{splat definition},   Splat,              name, list, block) end
       def opts; @option_parser; end
+      def help; # circumvent normal validation if the user wants to display help
+        lambda{ throw :interrupt, @option_parser.to_s }
+      end
       @fsa = {
         :options               => [nil, :options],
         %s{required arguments} => [nil, :options, %s{required arguments}],
@@ -392,17 +385,6 @@ module Hipe
       def short_name; @short_name ? %{-#{@short_name}} : nil end
       def long_name; @long_name ? %{--#{@long_name}} : nil end
     end
-   # class Range < ::Range  # experiments with our first validation struct @fixme
-   #   def initialize(start,endo,exclusive=false)
-   #     super start,endo,exclusive
-   #   end
-   #   def self.[](start,endo)
-   #     return self.new(start,endo)
-   #   end
-   #   def match(value)
-   #     return self === value
-   #   end
-   # end
     class Exception < ::Exception
       attr_reader :details
       protected
