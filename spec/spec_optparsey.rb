@@ -12,6 +12,12 @@ class AppOp1
   def sing(opts)
     %{decibles is "#{opts[:decibles]}"}
   end
+  cli.does(:dance, "a lil jig") do
+    option('-a VALUE','thing with only short name')
+  end
+  def dance(opts)
+    %{dancing: "#{opts[:a]}"}
+  end
 end
 
 describe AppOp1 do
@@ -25,11 +31,9 @@ describe AppOp1 do
     response.should.equal %{decibles is "implementation says "27"implementation says "26""}
   end
 
-end
-
-class AppOp5
-  include Hipe::Cli
-
-
+  it "uses short name when there is no long name" do
+    @app = AppOp1.new
+    @app.cli.run(['dance','-aBLAH']).should.equal %{dancing: "BLAH"}
+  end
 
 end

@@ -8,7 +8,7 @@ require 'hipe-core/lingual'
 
 module Hipe
   module Cli
-    VERSION = '0.0.4'
+    VERSION = '0.0.5'
     DIR = File.expand_path('../../',__FILE__) # only used by tests that use examples :/
     AppClasses = {}
     def self.included klass
@@ -24,11 +24,12 @@ module Hipe
       def cli; @cli end
     end
     class Cli
-      attr_reader :commands
+      attr_reader :commands, :parent_cli
       attr_accessor :description
       def initialize(klass)
         @app_class = klass
-        @commands = Commands.new
+        @commands = Commands.new(self)
+        @plugins = nil
       end
       def dup_for_app_instance(instance)
         spawn = self.dup
@@ -36,12 +37,35 @@ module Hipe
         spawn
       end
       def init_for_app_instance(instance)
+        @app_instance = instance
         @commands = @commands.dup
-        @commands.app_instance = instance
+        @commands.cli = self
+        if (@plugins)
+          @plugins = @plugins.dup
+          @plugins.cli = self
+        end
       end
+      def init_as_plugin(parent_app_instance, name, plugin_app_instance)
+        @parent_cli = parent_app_instance.cli
+        @my_name_as_plugin = name
+        init_for_app_instance(plugin_app_instance)
+      end
+      def app_instance!
+        raise "there is no app instance!" unless @app_instance
+        @app_instance
+      end
+      def app_instance; @app_instance; end
       def does name, *list, &block
         @commands.add(name, *list, &block)
       end
+      def plugin
+        @plugins ||= Plugins.new(self)
+      end
+      alias_method :plugins, :plugin # hm
+      def command_prefix
+        @my_name_as_plugin ? %{#{@parent_cli.command_prefix}#{@my_name_as_plugin}:} : nil
+      end
+
       def run argv
         if (cmd = @commands[name = argv.shift])
           begin
@@ -91,15 +115,15 @@ module Hipe
     end
     class Commands < OrderedHash
       attr_reader :aliases
-      attr_writer :app_instance
-      def initialize
+      attr_accessor :cli
+      def initialize(cli)
         super()
-        @app_instance = nil
         @aliases = {}
+        @cli = cli
       end
       def add(name, *list, &block)
         command = CommandFactory.command_factory(name, *list, &block)
-        name_str = command.full_name;
+        name_str = command.main_name.to_s
         command.aliases.each do |aliaz|
           raise Exception.f(%{For now we can't redefine commands ("#{aliaz}")}) if @aliases[aliaz]
           @aliases[aliaz] = name_str
@@ -107,41 +131,37 @@ module Hipe
         self[name_str] = command
       end
       def [](aliaz)
-        if (cmd = super(@aliases[aliaz.to_s]))
-          cmd.app_instance = @app_instance
+        name = aliaz.to_s
+        if (cmd = super(@aliases[name]))
+          cmd.app_instance = @cli.app_instance
           cmd
+        elsif name.include? ':'
+          plugin_name, remainder = /^([^:]+):(.+)/.match(name).captures
+          @cli.plugin[plugin_name].cli.commands[remainder]
         end
+      end
+      def each(&block)
+        super(&block)
+        @cli.plugins.each do |k,plugin|
+          plugin.cli.commands.each(&block)
+        end
+      end
+      def size
+        super + @cli.plugins.inject(0){ |memo,pair| memo + pair[1].cli.commands.size }
       end
       protected :[]=
     end
     module CommandFactory
       def self.command_factory(name, *list, &block)
-        o = OptParseyCommandElement.parse_grammar(name,*list)
+        o = parse_grammar(name,*list)
         if (o.short_name || o.long_name)
           OptionLikeCommand.new(o, &block)
         else
           Command.new(o, &block)
         end
       end
-    end
-    module OptParseyCommandElement #required arguments, optional arguments, options (switches) and splat
-      attr_accessor :hipe_type, :app_instance
-      attr_reader :description
-      def main_name   # @TODO this will probably go now that we have integrated w/ optparse so much
-        str = nil
-        if (@long && @long.size > 0)
-          str = /^-?-?(.+)/.match(@long[0]).captures[0]
-        elsif (@short && @short.size > 0)
-          str = /^-?(.+)/.match(@short[0]).captures[0]
-        else
-          raise "what name to use?"
-        end
-        str.gsub('-','_').downcase.to_sym
-      end
-       def surface_name
-         /^-?-?(.+)/.match(@long[0]).captures[0]
-       end
       LONG_NAME_WITHOUT_ARGS = /^--([-_a-z0-9]+)/i
+      # optparse does something similar, too but we don't use it to parse commands themselves
       def self.parse_grammar(name,*list)
         o = OpenStruct.new()
         if (Symbol===name)
@@ -167,6 +187,22 @@ module Hipe
         end
         o
       end
+    end
+    module OptParseyCommandElement #required arguments, optional arguments, options (switches) and splat
+      attr_accessor :hipe_type, :app_instance
+      attr_reader :description
+      def main_name   # @TODO this will probably go now that we have integrated w/ optparse so much
+        str = nil
+        if (@long && @long.size > 0)
+          str = /^-?-?(.+)/.match(@long[0]).captures[0]
+        elsif (@short && @short.size > 0)
+          str = /^-?(.+)/.match(@short[0]).captures[0]
+        end
+        str.gsub('-','_').downcase.to_sym
+      end
+       def surface_name
+         /^-?-?(.+)/.match(@long[0]).captures[0]
+       end
     end
     module OptParseSwitch;
       include OptParseyCommandElement
@@ -217,12 +253,14 @@ module Hipe
       attr_writer :app_instance
       attr_reader :description
       def take_names(o) # take the contents of a parse tree containing main_name, long_name, etc
-        o.instance_variable_get('@table').each do |name,value|   # see OptParseyCommandElement#parse_grammar
+        o.instance_variable_get('@table').each do |name,value|   # see CommandFactory#parse_grammar
           instance_variable_set(%{@#{name}}, value)
         end
       end
       def main_name; @main_name end
-      def full_name; main_name.to_s end # always return a string here! optparse wants it for length()
+      def full_name # always return a string here! optparse wants it for length()
+        %{#{@app_instance.cli.command_prefix}#{main_name}}
+      end
       def as_method_name; main_name.to_s.gsub('-','_').downcase.to_sym end
     end
     class Command
@@ -384,6 +422,32 @@ module Hipe
       end
       def short_name; @short_name ? %{-#{@short_name}} : nil end
       def long_name; @long_name ? %{--#{@long_name}} : nil end
+    end
+    class Plugins < OrderedHash  # remember we store application classes or instances, not cli's
+      attr_accessor :cli
+      alias_method :set, :[]= # necessary in [] because we rewrite the class with the instance using the same name
+      def initialize(cli)
+        @cli = cli
+        super()
+      end
+      def []=(name, value)
+        name = name.to_s
+        raise GrammarGrammarException.f(%{Can't redefine a plugin ("#{name}")}) if has_key?(name)
+        super(name,value)
+      end
+      alias_method :get, :[]
+      def [](name)
+        name = name.to_s
+        return nil unless (plugin_class_or_app_instance = super(name))
+        if (Class===plugin_class_or_app_instance)
+          app_instance = plugin_class_or_app_instance.new
+          app_instance.cli.init_as_plugin(@cli.app_instance!, name, app_instance)
+          self.set(name,app_instance)
+          return app_instance
+        else
+          return plugin_class_or_app_instance # assume it is app instance!
+        end
+      end
     end
     class Exception < ::Exception
       attr_reader :details
