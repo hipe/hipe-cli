@@ -8,7 +8,7 @@ require 'hipe-core/lingual'
 
 module Hipe
   module Cli
-    VERSION = '0.0.5'
+    VERSION = '0.0.6'
     DIR = File.expand_path('../../',__FILE__) # only used by tests that use examples :/
     AppClasses = {}
     def self.included klass
