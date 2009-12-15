@@ -50,3 +50,27 @@ describe AppP1, "plugins" do
     str.should.equal 'archi: "REQ1VAL", "O1VAL"'
   end
 end
+
+
+module DontBecomePartOfName
+  class AppP5
+    include Hipe::Cli
+  end
+end
+e = nil
+begin
+  class AppP6
+    include Hipe::Cli
+    cli.plugins << DontBecomePartOfName::AppP5
+  end
+rescue Exception => ee
+  e = ee
+end
+
+describe AppP6 do
+  it "should be able to plugin with the left shift operator and just with a class (p5)" do
+    e.should.equal nil
+    app = AppP6.new
+    app.cli.plugins['app-p5'].cli.app_instance!.should.be.kind_of DontBecomePartOfName::AppP5
+  end
+end

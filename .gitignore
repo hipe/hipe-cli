@@ -18,3 +18,4 @@ bin
 vendor/gems
 tmp.*
 t.*
+hipe-cli.gemspec

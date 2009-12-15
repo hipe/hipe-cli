@@ -8,7 +8,7 @@ require 'hipe-core/lingual'
 
 module Hipe
   module Cli
-    VERSION = '0.0.6'
+    VERSION = '0.0.7'
     DIR = File.expand_path('../../',__FILE__) # only used by tests that use examples :/
     AppClasses = {}
     def self.included klass
@@ -24,12 +24,14 @@ module Hipe
       def cli; @cli end
     end
     class Cli
-      attr_reader :commands, :parent_cli
-      attr_accessor :description
+      attr_reader :commands, :parent_cli, :out, :output_registrar
+      attr_accessor :description, :plugin_name
       def initialize(klass)
         @app_class = klass
         @commands = Commands.new(self)
         @plugins = nil
+        @out = OutputBufferRegistrar.new(self)
+        @output_registrar = @out
       end
       def dup_for_app_instance(instance)
         spawn = self.dup
@@ -44,10 +46,22 @@ module Hipe
           @plugins = @plugins.dup
           @plugins.cli = self
         end
+        if (@out.class == Class)
+          @out = @out.new
+        end
+      end
+      def out=(symbol)
+        if (@out.kind_of? OutputBufferRegistrar)
+          @output_registrar = @out
+        end
+        @out = symbol # the only one ever doing this should be a plugin who knows it's a plugin
       end
       def init_as_plugin(parent_app_instance, name, plugin_app_instance)
         @parent_cli = parent_app_instance.cli
-        @my_name_as_plugin = name
+        @plugin_name = name
+        if Symbol === @out
+          @out = @parent_cli.output_registrar[@out].new
+        end
         init_for_app_instance(plugin_app_instance)
       end
       def app_instance!
@@ -63,7 +77,7 @@ module Hipe
       end
       alias_method :plugins, :plugin # hm
       def command_prefix
-        @my_name_as_plugin ? %{#{@parent_cli.command_prefix}#{@my_name_as_plugin}:} : nil
+        @plugin_name ? %{#{@parent_cli.command_prefix}#{@plugin_name}:} : nil
       end
       def run argv
         if (cmd = @commands[name = argv.shift])
@@ -114,6 +128,9 @@ module Hipe
         lines * "\n"
       end
     end
+    class OutputBufferRegistrar<Hash
+      def initialize(cli); @cli=cli end
+    end
     class Commands < OrderedHash
       attr_reader :aliases
       attr_accessor :cli
@@ -138,7 +155,7 @@ module Hipe
           cmd
         elsif name.include? ':'
           plugin_name, remainder = /^([^:]+):(.+)/.match(name).captures
-          @cli.plugin[plugin_name].cli.commands[remainder]
+          @cli.plugins[plugin_name].cli.commands[remainder]
         end
       end
       def each(&block)
@@ -287,6 +304,7 @@ module Hipe
     class Command
       include CommandLike
       def initialize(names, &block)
+        @app_instance = nil
         @block = block
         take_names(names)
       end
@@ -505,6 +523,11 @@ module Hipe
       def initialize(cli)
         @cli = cli
         super()
+      end
+      def <<(klass)
+        raise Exception.f(%{no: "#{klass}}) unless (Class == klass.class) && klass.ancestors.include?(Hipe::Cli)
+        name = klass.to_s.match(/([^:]+)$/).captures[0].gsub(/([a-z])([A-Z])/){ %{#{$1}-#{$2}}}.downcase
+        self[name] = klass
       end
       def []=(name, value)
         name = name.to_s

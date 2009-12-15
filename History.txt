@@ -1,9 +1,9 @@
-== 0.0.7 maybe
+== 0.0.8 or above will be:
   * splat
   * generate banner for individual commands
-== 0.0.6 or above will be:
   * predicates
-  * output buffering (and golden hammer)
+== 0.0.7 is: 2009-12-15
+  * output buffering class registration
 == 0.0.6 is:  
   * defaults
   * more helpful error messages from optparse    
