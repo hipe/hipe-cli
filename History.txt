@@ -1,11 +1,13 @@
-== 0.0.6 maybe
+== 0.0.7 maybe
   * splat
-  * more helpful error messages from optparse  
-== 0.0.5 or above will be:
+  * generate banner for individual commands
+== 0.0.6 or above will be:
   * predicates
-  * defaults
   * output buffering (and golden hammer)
-== 0.0.5 is currently:
+== 0.0.6 is:  
+  * defaults
+  * more helpful error messages from optparse    
+== 0.0.5 is 2009-10-14
   * plugins  
 == 0.0.4 / 2009-10-14
   * bugfix release for hipe-core
@@ -17,10 +19,10 @@
 == 0.0.3 
   * beginning of complete overhaul.  100% coverage! ;)
 == 0.0.2
- * confusion
+  * confusion
 == 0.0.1 / 2009-12-12
- * existing code cleaned up for 0.0.2 changes
- * passes all tests, 89% coverage
+  * existing code cleaned up for 0.0.2 changes
+  * passes all tests, 89% coverage
 == 0.0.0 / 2009-11-19
 * 1 major enhancement
   * existence (apologies to webrat)

@@ -65,13 +65,14 @@ module Hipe
       def command_prefix
         @my_name_as_plugin ? %{#{@parent_cli.command_prefix}#{@my_name_as_plugin}:} : nil
       end
-
       def run argv
         if (cmd = @commands[name = argv.shift])
           begin
             cmd.run(argv)
           rescue OptionParser::ParseError => e
-            e.reason
+            e.extend ParseErrorExtension
+            e.add_details(cmd)
+            e.cli_message
           end
         else
           bad_command(name)
@@ -190,7 +191,7 @@ module Hipe
     end
     module OptParseyCommandElement #required arguments, optional arguments, options (switches) and splat
       attr_accessor :hipe_type, :app_instance
-      attr_reader :description
+      attr_reader :description, :default
       def main_name   # @TODO this will probably go now that we have integrated w/ optparse so much
         str = nil
         if (@long && @long.size > 0)
@@ -200,13 +201,27 @@ module Hipe
         end
         str.gsub('-','_').downcase.to_sym
       end
-       def surface_name
-         /^-?-?(.+)/.match(@long[0]).captures[0]
-       end
+      def surface_name
+        /^-?-?(.+)/.match(@long[0]).captures[0]
+      end
+      def set_default(val) # separate method only so that required positionals can complain
+        @has_default = true
+        @default = val
+      end
+      def init_as_hipe_type(opt_hash)
+        if (opt_hash)
+          if opt_hash.has_key? :default
+            if (@arg.nil? or !(/[^ ]/=~@arg) or (/\[\]/=~@arg))
+              raise Exception.f(%{for "#{main_name}" to take a default value it must take a required arg, not "#{@arg}"})
+            end
+            set_default(opt_hash.delete(:default))
+          end
+        end
+      end
+      def has_default?; @has_default end
     end
     module OptParseSwitch;
       include OptParseyCommandElement
-      def init_as_hipe_type; end
     end
     module PositionalArgument;
       include OptParseyCommandElement
@@ -218,11 +233,17 @@ module Hipe
         @long[0].replace(%{--#{@long[0]}})
         @arg = ' '
       end
-      def init_as_hipe_type
+      def init_as_hipe_type(opt_hash)
+        super(opt_hash)
         prepare_for_display
       end
     end
-    module RequiredPositional;    include PositionalArgument       end
+    module RequiredPositional;
+      include PositionalArgument
+      def set_default(val)
+        raise Exception.f(%{required arguments can't have defaults ("#{main_name}")})
+      end
+    end
     module OptionalPositional;    include PositionalArgument       end
     module Splat;                 include OptParseyCommandElement  end
 
@@ -250,7 +271,7 @@ module Hipe
       end
     end
     module CommandLike # probably no reason to be a module
-      attr_writer :app_instance
+      attr_accessor :app_instance
       attr_reader :description
       def take_names(o) # take the contents of a parse tree containing main_name, long_name, etc
         o.instance_variable_get('@table').each do |name,value|   # see CommandFactory#parse_grammar
@@ -272,75 +293,108 @@ module Hipe
       def aliases
         [@main_name.to_s]
       end
+      def elements
+        parse_definition unless @switches_by_name
+        @switches_by_name
+      end
       def desc_arr  # if we wanna be like optparse, return an array.
         return [] unless @description
         Hipe::AsciiTypesetting::FormattableString.new(@description).word_wrap!(39).split("\n") # @todo
       end
+      def help_switch
+        help_option = elements.detect do |x|
+           OptParseSwitch===x[1] and x[1].short.include?('-h') or x[1].long.include?('--help')
+        end
+        help_option ? ( help_option[1].short.size > 0 ? help_option[1].short[0] : help_option[1].long[0]) : nil
+      end
+      # because of the crazy nature of the code blocks this needs to be run for each call to run()
+      # @return [OptionValues] the hash that is in scope when you made the definition
+      # @post_condition: @switches_by_name, @switches_by_type get set
+      def parse_definition
+        @prev = nil
+        opt_values = OptionValues.new     # is in scope below for switches to write their results to
+        switches = {                      # hold on to each switch that OptParser builds
+          OptParseSwitch=>[], PositionalArgument=>[],
+          RequiredPositional=>[], OptionalPositional=>[],
+          Splat=>[]  #never more than one element in here
+        }
+        switches_by_name = {}
+        opts = OptionParser.new do |opts| # build all the switches for options, required, optionals, splat in one go
+          @option_parser = opts           # is made available thru opts() so definitions can e.g. opts.separator()
+          @definitions = []               # gets populated in the next line
+          self.instance_eval(&@block)     # runs all the option(), required(), optional(), splat() definitions
+          @definitions.each do |my_info|  # with each one of those definition we 'recoreded' ...
+            first_arg = my_info.first_arg.to_s
+            unless /^-/ =~ first_arg
+              first_arg = %{--#{first_arg} VALUE} # positional arguments will need proper names and parameters
+            end                           # only for their construction (hack alert!)
+            switch = opts.define(first_arg,*my_info.list,&my_info.block) # make an optional, required, option, etc.
+            switch.extend my_info.hipe_type
+            switch.hipe_type = my_info.hipe_type
+            switches[switch.hipe_type] << switch
+            if (PositionalArgument===switch)
+              switches[PositionalArgument] << switch  # like an abstract base class. never the actual hipe_type
+            end
+            switch.init_as_hipe_type(my_info.opt_hash)
+            switches_by_name[switch.main_name] = switch
+            orig_block = switch.block
+            new_block = Proc.new() do |x|
+              if (orig_block)
+                result_from_original = orig_block.call(x)
+                opt_values[switch.main_name] = result_from_original
+              else
+                opt_values[switch.main_name] = x
+              end
+            end
+            switch.instance_variable_set('@block',new_block)
+          end
+        end
+        @switches_by_type = switches
+        @switches_by_name = switches_by_name
+        opt_values
+      end
+
       def run(argv)
         return run_with_application(argv) unless @block #if there is no definition block we pass the args raw
-        @prev = nil
-        ret = catch(:interrupt) do
-          opt_values = OptionValues.new     # is in scope below for switches to write their results to
-          switches = {                      # hold on to each switch that OptParser builds
-            OptParseSwitch=>[], PositionalArgument=>[],
-            RequiredPositional=>[], OptionalPositional=>[],
-            Splat=>[]  #never more than one element in here
-          }
-          opts = OptionParser.new do |opts| # build all the switches for options, required, optionals, splat in one go
-            @option_parser = opts           # is made available thru opts() so definitions can e.g. opts.separator()
-            @definitions = []               # gets populated in the next line
-            self.instance_eval(&@block)     # runs all the option(), required(), optional(), splat() definitions
-            @definitions.each do |my_info|  # with each one of those definition we 'recoreded' ...
-              first_arg = my_info.first_arg
-              unless /^-/ =~ first_arg
-                first_arg = %{--#{first_arg} VALUE} # positional arguments will need proper names and parameters
-              end                           # only for their construction (hack alert!)
-              switch = opts.define(first_arg,*my_info.list,&my_info.block) # make an optional, required, option, etc.
-              switch.extend my_info.hipe_type
-              switch.hipe_type = my_info.hipe_type
-              switches[switch.hipe_type] << switch
-              if (PositionalArgument===switch)
-                switches[PositionalArgument] << switch  # like an abstract base class. never the actual hipe_type
-              end
-              switch.init_as_hipe_type
-              orig_block = switch.block
-              new_block = Proc.new() do |x|
-                if (orig_block)
-                  result_from_original = orig_block.call(x)
-                  opt_values[switch.main_name] = result_from_original
-                else
-                  opt_values[switch.main_name] = x
-                end
-              end
-              switch.instance_variable_set('@block',new_block)
-            end
-          end
+        opt_values = parse_definition
+        switches = @switches_by_type
+        ret = catch(:interrupt) do # options like "help" might throw an interrupt so that the rest of the thing isn't validated
+
+          # add defaults to the argv (we do it now and not later to trigger validation by optpare even on default values)
+          if (sw = switches[OptParseSwitch].select{|x| x.has_default? }).size>0 then apply_defaults(sw, argv) end
 
           # parse any options (as oppposed to arguments) in the grammar
-          if (switches[OptParseSwitch].size > 0)
-            opts.parse!(argv)  # result equal? argv is always true probably
-          end
+          opts.parse!(argv) if switches[OptParseSwitch].size > 0
 
-          switches[PositionalArgument].each{|x| x.prepare_for_parse } #awful hack! if they request help
+          # awful hack! if they requested for help above, we want the things to have names w/o dashes, but now we need them.
+          switches[PositionalArgument].each{|x| x.prepare_for_parse }
 
-          # iterate over the remaining required and optional arguments...
-          if (switches[PositionalArgument].size > 0)
-            new_argv = treeify_argv(switches[PositionalArgument], argv)
+          # iterate over the remaining required and optional arguments
+          if switches[PositionalArgument].size > 0
+            new_argv = turn_positionals_into_switches(switches[PositionalArgument], argv)
+            if (sw = switches[PositionalArgument].select{|x| x.has_default? }).size>0 then apply_defaults(sw, new_argv) end
             opts.parse!(new_argv)
           end
 
           # complain about any required arguments that are not in the opt_values
-          provided = opt_values.keys
-          missing = switches[RequiredPositional].select{|x| ! provided.include? x.main_name}
+          missing = (switches[RequiredPositional].map{|x| x.main_name} - opt_values.keys).map{|x| @switches_by_name[x]}
           error_missing(missing) if missing.size > 0
 
           # complain if there are any remaining unparsed arguments  #@TODO splat
           error_needless(argv) if (argv.size > 0)
 
+          # flatten the parsed values back into an array for the implementing method
           args_for_implementer = flatten_args(switches, opt_values)
           ret = run_with_application(args_for_implementer)
         end
         ret
+      end
+      def apply_defaults(switches, argv)
+        shorts, longs = [], []
+        argv.grep(/(?:^(-[a-z0-9]))|(?:^(--[a-z0-9][-a-z0-9]+))/){|_| shorts<<$1 if $1; longs<<$2 if $2 }
+        switches.select{|x| (x.short & shorts).size == 0 and (x.long & longs).size == 0 }.each do |x|
+          argv.concat( (x.long.size > 0 ) ? [x.long[0], x.default ] : [%{#{x.short[0]}#{x.default}}] )
+        end
       end
       def flatten_args(switches, opt_values)
         arg_array = []
@@ -352,7 +406,7 @@ module Hipe
         end
         arg_array
       end
-      def treeify_argv(positional, argv)
+      def turn_positionals_into_switches(positional, argv)
         new_argv = []
         positional.each do |switch|
           break if (argv.size == 0)
@@ -399,12 +453,34 @@ module Hipe
           raise Exception.f(%{#{state_symbol} should not appear after #{@prev}})
         end
         @prev = state_symbol
-        definition = {:hipe_type=>mod, :first_arg => name, :list => list, :block => block}
+        # find any hashes that do not follow arrays and assert there is no more then one... then make it an opts hash
+        opt_hashes = []
+        i = nil
+        list.each_with_index do |val, i|
+          if (Hash===val and i==0 || !(Array===list[i-1]))
+            opt_hashes << val
+          end
+        end
+        if (opt_hashes.size > 0)
+          raise Exception.f(%{Cannot have more than one options hash for "#{name}"}) if opt_hashes.size > 1
+          opt_hash = list.slice!(i,1)[0]
+        end
+        definition = {:hipe_type=>mod, :first_arg => name, :list => list, :block => block, :opt_hash=>opt_hash}
         @definitions << OpenStruct.new(definition)
       end
       def run_with_application(argv)
         if @app_instance.respond_to?(as_method_name)
-          @app_instance.send(as_method_name, *argv)
+          begin
+            @app_instance.send(as_method_name, *argv)
+          rescue ArgumentError => e
+            if md = /wrong number of arguments \((\d+) for (\d+)\)/.match(e.message)
+              raise Exception.f(%{Your #{@app_instance.class}\##{as_method_name}() must take #{md[1]} arguments to }+
+              %{correspond to the grammar defined for the command. You take #{md[2]}.}
+              )
+            else
+              raise e
+            end
+          end
         elsif([:help].include? as_method_name)
           @app_instance.cli.help(*argv)
         else
@@ -448,6 +524,39 @@ module Hipe
           return plugin_class_or_app_instance # assume it is app instance!
         end
       end
+    end
+    # add as much metadata as you can to parse errors thrown from OptionParser
+    module ParseErrorExtension
+      attr_reader :command_element, :command
+      def add_details(cmd)
+        @command = cmd
+        if "invalid argument" == reason
+          detected = case @args[0]
+            when /^--/ then cmd.elements.detect{|x| x[1].long[0] == @args[0]}
+            when /^-([^-])/  then cmd.elements.detect{|x| x[1].short[0] == $1 }
+          end
+          @command_element = detected[1] if detected
+        end
+      end
+      def extended_message
+        msg = self.message
+        if (@command_element && 'invalid argument' == reason)
+          msg = %{invalid value for #{@command_element.main_name}: "#{@args[1]}"}
+          if (false)
+            # describe possible blah blah
+          end
+        end
+        msg
+      end
+      def cli_message
+        msg = extended_message
+        if (@command and help_switch = @command.help_switch)
+          msg << %{\nSee "#{@command.app_instance.cli.program_name} #{@command.full_name} #{help_switch}" for more info.}
+        end
+        msg
+      end
+      def message; @use_message || super end
+      alias_method :to_s, :message
     end
     class Exception < ::Exception
       attr_reader :details
