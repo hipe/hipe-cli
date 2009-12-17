@@ -14,7 +14,7 @@ module GemHelpers
       s.homepage  = "http://github.com/hipe/hipe-cli"
       s.date      = %q{2009-12-12}  
       s.summary   = %q{beginnings of yet another cli library}  
-      s.executables = ['hipe-cli']      
+      s.executables = ['hipe-cli','hipe-cli-argv-echo']      
       s.description  = <<-EOS.strip
       yet another take on cli
       EOS

@@ -58,14 +58,23 @@ describe AppH7, 'larger' do
   it "should display about blearg (h8)" do
     @app.cli.run(['blearg','-h']).should.match(%r{REQ1.*REQ2.*OPT1.*OPT2}m)
   end
-  it "parses (h9)" do
+  it "pass on valid input (h9)" do
     @app.cli.run(['blearg','-c','clean','flim','flam','shoo-by','doo-by']).should.
      equal %{flim/req2:flam/shoo-by/doo-by/{:cleanliness=>"clean"}"}
   end
-  it "this (h10)" do
-     @app.cli.run(%w(blearg -c clean flim flam shoo-by doo-by blah)).should.match %r{unexpected}
+  it "complain unexpected (h10)" do
+     @app.cli.run(%w(blearg -c clean flim flam shoo-by doo-by blah)).to_s.should.match %r{unexpected}
   end
-  it "this (h11)" do
-     @app.cli.run(%w(blearg -c clean flim)).should.match %r{missing}
+  it "complain missing (h11)" do
+     @app.cli.run(%w(blearg -c clean flim)).to_s.should.match %r{missing}
+  end
+end
+
+class AppH11; include Hipe::Cli; cli.does('-h','--help'); end
+
+describe AppH11 do
+  it "should secrety do the recursive help easter egg that no one will ever find (h12)" do
+    x = AppH11.new.cli.commands[:help].run(['-h','--help','-?'] * 10 )
+    x.should.match(Regexp.new(Regexp.escape('[...[...[..[.]]]]')))
   end
 end

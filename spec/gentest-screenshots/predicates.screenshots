@@ -1,0 +1,38 @@
+{"prompt":"~/c > ","app_file":"app-it3-predicates"}
+
+# you get a default sandwich this way.  enjoy your olives
+~/c > it3 order-sandwich julia
+your sandwich:
+  slice of bread: white
+    olives: 3 ct.
+  slice of bread: white
+done.
+
+
+# i need to know how many olives you want, juila.
+~/c > it3 order-sandwich julia -o
+missing argument: -o
+
+
+# enjoy all of your olives
+~/c > it3 order-sandwich julia -o12
+your sandwich:
+  slice of bread: white
+    olives: 12 ct.
+  slice of bread: white
+done.
+
+# you can't have this many olives 
+~/c >  it3 order-sandwich julia -o13
+13 is too high a value for num olives.  It can't be above 12
+
+# negative olives don't exist except in cemrel
+~/c >  it3 order-sandwich julia -o-1
+-1 is too low a value for num olives.  It can't be below 12
+
+# this is what they serve you in prison
+~/c > it3 order-sandwich julia -o0
+your sandwich:
+  slice of bread: white
+  slice of bread: white
+done.

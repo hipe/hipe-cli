@@ -1,15 +1,19 @@
-== 0.0.8 or above will be:
+== 0.0.9 (the next bleeding edge version) or above will be:
   * splat
-  * generate banner for individual commands
+  * generated descriptions for command elements from dsl
+  * generate banner (syntax) for individual commands
+== 0.0.8 (this bleeding edge version) or above will be:
+  * predicates with 98.44% coverage
+  * removed output buffering class registration
+== 0.0.7 / 2009-12-15 
   * predicates
-== 0.0.7 is: 2009-12-15
   * output buffering class registration
-== 0.0.6 is:  
+== 0.0.6 
   * defaults
   * more helpful error messages from optparse    
-== 0.0.5 is 2009-10-14
+== 0.0.5 / 2009-12-14
   * plugins  
-== 0.0.4 / 2009-10-14
+== 0.0.4 / 2009-12-14
   * bugfix release for hipe-core
   * need to figure out how to handle exceptions on syntax errors (sort of)
   * using optparse to display help screen for the application 

@@ -36,9 +36,10 @@ describe AppD1,'defaults' do
     str.should.equal %[apparatus is "round ball" and opts are: {:long_one=>"longval", :o=>"just one", :last_one=>"last1"}]
   end
 
-  it "should pass thru again (d6)" do
-    str = @app.cli.run(['rhythmic-gymnastics','wrong'])
-    str.should.match %r{invalid value for apparatus: "wrong"}
+it "should pass thru again (d6)" do
+    @app = AppD1.new
+    res = @app.cli.run(['rhythmic-gymnastics','wrong'])
+    res.to_s.should.match %r{invalid value for apparatus: "wrong"}
   end
 
 end
@@ -72,6 +73,6 @@ describe AppD7, "fallatious" do
   it "single letter list thing (d9)" do
     @app = AppD7.new
     msg = @app.cli.run(['bling','-a=e'])
-    msg.should.match %r{invalid argument}
+    msg.to_s.should.match %r{invalid argument}
   end
 end

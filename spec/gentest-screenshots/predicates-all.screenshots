@@ -1,0 +1,61 @@
+{"prompt":"~/c > ","app_file":"app-it4-all-builtin-predicates"}
+
+# emtpy should be ok
+~/c > it4 go 
+your opts: {}
+
+# regexp fail
+~/c > it4 go --against-regexp fail
+against regexp "fail" does not match the correct pattern
+
+# regexp succ
+~/c > it4 go --against-regexp abc123
+your opts: {:against_regexp=>["abc", "123"]}
+
+# integer fail
+~/c > it4 go --must-be-integer abc
+Your value for must be integer ("abc") does not appear to be an integer
+
+# integer succ
+~/c > it4 go --must-be-integer 123
+your opts: {:must_be_integer=>123}
+
+# float fail
+~/c > it4 go --must-be-float abc
+Your value for must be float ("abc") does not appear to be a float
+
+# float succ zero point zero
+~/c > it4 go --must-be-float 0.0
+your opts: {:must_be_float=>0.0}
+
+# float succ neg zero
+~/c > it4 go --must-be-float -0.0
+your opts: {:must_be_float=>-0.0}
+
+# float succ zero
+~/c > it4 go --must-be-float 0
+your opts: {:must_be_float=>0.0}
+
+# float succ one
+~/c > it4 go --must-be-float 1
+your opts: {:must_be_float=>1.0}
+
+# float succ neg one
+~/c > it4 go --must-be-float -1
+your opts: {:must_be_float=>-1.0}
+
+# file must exist succ
+~/c > it4 go --must-exist spec/read-only/exists.txt 
+your opts: {:must_exist=>"spec/read-only/exists.txt"}
+
+# file must exist fail
+~/c > it4 go --must-exist spec/read-only/not-exists.txt 
+File not found: "spec/read-only/not-exists.txt"
+
+# file must not exit succ
+~/c > it4 go --must-not-exist spec/read-only/exists.txt 
+File must not exist: "spec/read-only/exists.txt"
+
+# file must not exit fail
+~/c > it4 go --must-not-exist spec/read-only/not-exists.txt 
+your opts: {:must_not_exist=>"spec/read-only/not-exists.txt"}

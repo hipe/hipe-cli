@@ -51,7 +51,6 @@ describe AppP1, "plugins" do
   end
 end
 
-
 module DontBecomePartOfName
   class AppP5
     include Hipe::Cli
@@ -70,7 +69,11 @@ end
 describe AppP6 do
   it "should be able to plugin with the left shift operator and just with a class (p5)" do
     e.should.equal nil
-    app = AppP6.new
-    app.cli.plugins['app-p5'].cli.app_instance!.should.be.kind_of DontBecomePartOfName::AppP5
+    @app = AppP6.new
+    @app.cli.plugins['app-p5'].cli.app_instance!.should.be.kind_of DontBecomePartOfName::AppP5
+  end
+  it "should fail on (p6)" do
+    e = lambda { @app.cli.commands["not:there"] }.should.raise(Exception)
+    e.message.should.match %r{unrecognized plugin "not". Known plugins are "app-p5"}i
   end
 end
