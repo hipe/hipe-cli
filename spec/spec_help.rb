@@ -17,7 +17,7 @@ describe AppH7, 'after the call to parse_definition' do
     c = @app.cli.commands['gen_me']
     c.parse_definition
     c.switches_by_name.size.should.equal 2
-    c.switches_by_type.size.should.equal 5
+    c.switches_by_type.size.should.equal 6
     c.switches_by_type[Hipe::Cli::Switch].size.should.equal 2
   end
 

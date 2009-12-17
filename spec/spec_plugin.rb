@@ -66,7 +66,14 @@ rescue Exception => ee
   e = ee
 end
 
-describe AppP6 do
+module Hipe::Cli::ModuleForTesting; end
+
+class AppP7
+  include Hipe::Cli
+  cli.load_plugins_from_dir(File.join(Hipe::Cli::DIR,'spec','read-only','a-plugins-directory'),Hipe::Cli::ModuleForTesting)
+end
+
+describe AppP6,' and AppP7' do
   it "should be able to plugin with the left shift operator and just with a class (p5)" do
     e.should.equal nil
     @app = AppP6.new
@@ -76,4 +83,15 @@ describe AppP6 do
     e = lambda { @app.cli.commands["not:there"] }.should.raise(Exception)
     e.message.should.match %r{unrecognized plugin "not". Known plugins are "app-p5"}i
   end
+  it "should load plugins from dir (p7)" do
+    app = AppP7.new
+    app.cli.plugins.size.should.equal 2
+    app.cli.plugin['plugin-a'].should.be.kind_of(Hipe::Cli)
+  end
 end
+
+
+
+
+
+

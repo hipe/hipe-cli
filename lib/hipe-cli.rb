@@ -25,16 +25,75 @@ module Hipe
     module AppClassMethods
       def cli; @cli end
     end
+    def self.make_definition(type_module, name, list, block)
+      # find any hashes that do not follow arrays and assert there is no more then one... then make it an opts hash
+      opt_hashes, i = [], nil
+      list.each_with_index do |val, i|
+        opt_hashes << val if (Hash===val and i==0 || !(Array===list[i-1]))
+      end
+      if (opt_hashes.size > 0)
+        raise Exception.f(%{Cannot have more than one options hash for "#{name}"}) if opt_hashes.size > 1
+        opt_hash = list.slice!(i,1)[0]
+      end
+      OpenStruct.new({:hipe_type=>type_module, :first_arg => name, :list => list, :block => block, :opt_hash=>opt_hash})
+    end
+    # because of the crazy nature of the code blocks this needs to be run for each call to run()
+    # @return [OptionValues] the hash that is in scope when you made the definition
+    # @post_condition: @definitions, @switches_by_name, @switches_by_type get set.  Not ordered for now.
+    def self.definition_proc(definitions = nil,opt_values=nil)
+      Proc.new do
+        @prev = nil                       # for the "fsa" that makes sure things appear in the right order
+        if definitions.nil?
+          @definitions = []                # added to in instance eval below
+        end
+        opt_values ||= OptionValues.new   # is in scope below for switches to write their results to
+        @switches_by_name = { }           # hold on to each switch that OptParser builds
+        @switches_by_type = { Switch=>[], Positional=>[], Required=>[], Optional=>[], Universal=>[], Splat=>[] }
+        # if you have no definitions and block then you are done.
+        if (@block || definitions)
+          pass_this_to_op = lambda do |opts| # build all the switches for options, required, optionals, splat in one go
+            @option_parser = opts           # is made available thru opts() so definitions can e.g. opts.separator()
+            self.instance_eval(&@block) unless definitions # runs all the option(), required(), optional(), splat() definitions
+            (definitions || @definitions).each do |my_info|  # with each one of those definition we 'recorded' ...
+              first_arg = my_info.first_arg.to_s
+              unless /^-/ =~ first_arg
+                first_arg = %{--#{first_arg} VALUE} # positional arguments will need proper names and parameters
+              end                           # only for their construction (hack alert!)
+              switch = opts.define(first_arg,*my_info.list,&my_info.block) # make an optional, required, option, etc.
+              my_info.command = self
+              switch = my_info.hipe_type.enhance_switch(switch, my_info)  # for now it returns the same object but maybe not later
+              @switches_by_type[switch.hipe_type] << switch
+              if (Positional===switch)
+                @switches_by_type[Positional] << switch  # like an abstract base class. never the actual hipe_type
+              end
+              @switches_by_name[switch.main_name] = switch
+              orig_block = switch.block
+              new_block = Proc.new() do |it|
+                if orig_block
+                  It.make_it_an_It(it, self, switch)
+                  result_from_original = orig_block.call(it)
+                  opt_values[switch.main_name] = result_from_original
+                else
+                  opt_values[switch.main_name] = it
+                end
+              end
+              switch.instance_variable_set('@block',new_block)
+            end
+          end
+          OptionParser.new(&pass_this_to_op) # really confusing -- a bunch of stuff above in this scope gets set
+        end
+        opt_values
+      end
+    end
     class Cli
-      attr_reader :commands, :parent_cli, :output_registrar, :out
+      attr_reader :commands, :parent_cli, :output_registrar, :out, :universals
       attr_accessor :description, :plugin_name, :default_command
       def initialize(klass)
         @app_class = klass
-        @app_instance = nil
+        @app_instance = @plugins = @default_command = nil
         @commands = Commands.new(self)
-        @default_command = nil
-        @plugins = nil
         @out = Out.new
+        @universals = []
       end
       def dup_for_app_instance(instance)
         spawn = self.dup
@@ -67,12 +126,37 @@ module Hipe
         @plugins ||= Plugins.new(self)
       end
       alias_method :plugins, :plugin # hm
+      def load_plugins_from_dir(full_path,container_module)
+        require 'hipe-core/class-loader'
+        skip_file = (File.join full_path, 'ignore-list')
+        skip_list = File.exist?(skip_file) ? File.read(skip_file).split("\n") : []
+        files = Dir[File.join full_path, '*.rb']
+        raise Exception.f(%{no plugins in directory: "#{full_path}"}) unless files.size > 0
+        files.each do |filename|
+          next if skip_list.include?(File.basename(filename))
+          plugins << Hipe::ClassLoader.from_file!(filename,container_module)
+        end
+      end
       def command_prefix
         @plugin_name ? %{#{@parent_cli.command_prefix}#{@plugin_name}:} : nil
       end
-      def run argv
+      def run argv # cli
+        univ_values = if (@universals.size>0)
+          definition = Hipe::Cli.definition_proc(@universals)
+          univ_values = instance_eval(&definition)
+          # oh boy..find the first instance of a token in argv that looks like a switch for which we have no corresponding
+          # short or long switch.
+          univ = @switches_by_name.values.map{|x| x.short + x.long }.flatten
+          idx = argv.find_index{|x| (md=/^(-[a-z0-9])|(--[a-z0-9][-a-z0-9_]*)/i.match(x)) && (univ & md.captures).size == 0}
+          idx ||= 0
+          later = argv.slice!(idx, argv.size-idx)
+          @option_parser.parse!(argv)
+          Hipe::OpenStructLike.enhance(univ_values)
+          argv.concat(later)
+          univ_values
+        end
         if (cmd = @commands[name = (argv.shift || @default_command)])
-          rs = cmd.run(argv)
+          rs = cmd.run(argv,univ_values)
           rs.execution_context = :cli if rs.respond_to?("execution_context=")
           rs.nil? ? '' : rs
         else
@@ -125,6 +209,9 @@ module Hipe
         lines << left + right.word_wrap_once!(right_column_width)
         lines << right.word_wrap!(right_column_width).indent!(left.length) if right.size > 0
         lines * "\n"
+      end
+      def option(name,*list,&block)
+        @universals << Hipe::Cli.make_definition(Universal, name, list, block)
       end
     end
     class Out
@@ -305,7 +392,10 @@ module Hipe
       include CommandElement
       def self.enhance_switch(*args); CommandElement.enhance_switch(*args); end
     end
-
+    module Universal # application-level options that can appear before the command
+      include Switch
+      def self.enhance_switch(*args); Switch.enhance_switch(*args); end
+    end
     # This is just a plain old (ordered) hash for storing the values from *all* command elements
     # (required, optional, options, splat) during the parse.  The difference is that when a value
     # is attempted to be added with when that key already exists, the existing value is turned
@@ -327,24 +417,6 @@ module Hipe
         else
           super(x,y)
         end
-      end
-    end
-    module CommandLike # probably no reason to be a module
-      attr_accessor :app_instance
-      attr_reader :description
-      def take_names(o) # take the contents of a parse tree containing main_name, long_name, etc
-        o.instance_variable_get('@table').each do |name,value|   # see CommandFactory#parse_grammar
-          instance_variable_set(%{@#{name}}, value)
-        end
-      end
-      def main_name; @main_name end
-      def full_name # always return a string here! optparse wants it for length()
-        %{#{@app_instance.cli.command_prefix}#{main_name}}
-      end
-      def as_method_name; main_name.to_s.gsub('-','_').downcase.to_sym end
-      def desc_arr  # if we wanna be like optparse, return an array.
-        return [] unless @description
-        Hipe::AsciiTypesetting::FormattableString.new(@description).word_wrap!(39).split("\n") # @todo
       end
     end
     module It
@@ -390,119 +462,40 @@ module Hipe
         @command_element.add_validation_failure(f)
       end
     end
-    module BuiltinPredicates
-      It.register_predicates(self)
-      def must_match_regexp(re, message_template=nil)
-        if (md = re.match(self))
-          if (md.captures.size > 0)
-            it = md.captures
-            It.changed_type(it, self)
-          else
-            # it passed and there's no captures.  fall thru
-            it = self
-          end
-        else
-          message_template ||= %{%human_name% "%provided_value%" does not match the correct pattern}
-          add_validation_failure ValidationFailure.f(:message_template=>message_template, :type=>:regexp_failure)
-          it = self
-        end
-        it
-      end
-      def must_match(pattern,*etc) # magic alert!
-        method_man = 'must_match_'+pattern.class.to_s.gsub(/::/,'__').gsub(/([a-z])([A-Z])/,'\1_\2').downcase
-        send(method_man,pattern,*etc)
-      end
-      def must_be_float(message_template=nil)
-        if /^-?\d+\.?\d*$/.match(to_s)
-          it = to_f
-          It.changed_type(it, self)
-        else
-          message_template ||= %{Your value for %human_name% ("%provided_value%") does not appear to be a float}
-          add_validation_failure ValidationFailure.f(:message_template=>message_template,:type=>:float_cast_failure)
-          it = self
-        end
-        it
-      end
-
-      # this thing casts it to a fixnum so it must be the last predicate
-      def must_be_integer(message_template=nil)
-        if /^-?\d+$/.match(to_s)
-          it = to_i
-          It.changed_type(it, self)
-        else
-          message_template ||= %{Your value for %human_name% ("%provided_value%") does not appear to be an integer}
-          add_validation_failure ValidationFailure.f(:message_template=>message_template,:type=>:integer_cast_failure)
-          it = self
-        end
-        it
-      end
-
-      # this assertion implies that the thing must be a float (maybe it must be an integer, too!) but it does no casting.
-      def must_match_range(range,message_template=nil)
-        it = self  # we always return the original value (usually it's a string)
-        if ! (md = /^-?\d+(?:\.?\d+)?$/=~it)
-          message_template ||= %{%human_name% must be numeric}
-          add_validation_failure ValidationFailure.f(:message_template=>message_template, :type=>:range_failure)
-        else
-          as_number = self.to_f
-          if ! (range===as_number)
-            message_template ||= if as_number < range.begin
-              %{%provided_value% is too low a value for %human_name%.  It can't be below #{range.end}}
-            else
-              %{%provided_value% is too high a value for %human_name%.  It can't be above #{range.end}}
-            end
-            add_validation_failure ValidationFailure.f(:message_template=>message_template, :type=>:range_failure)
-          end
-        end
-        it
-      end
-      def must_exist!(message_template=nil) # as a file
-        it = self
-        unless (File.exist?(it))
-          message_template ||= %{File not found: "#{it}"}
-          add_validation_failure ValidationFailure.f(:message_template=>message_template,:type=>:file_not_found)
-          throw(:interrupt_validation, :validation_failures)
-        end
-        it
-      end
-      def must_not_exist!(message_template=nil,interrupt_if_exists=false) # as a file
-        it = self
-        if (File.exist?(it))
-          message_template ||= %{File must not exist: "#{it}"}
-          add_validation_failure ValidationFailure.f(:message_template=>message_template,:type=>:file_exists)
-          throw(:interrupt_validation, :validation_failures)
-        end
-        it
-      end
-      def gets_opened(mode) # for a file, @return new Openstruct It with fh (filehandle) and filename
-        begin
-          fh = File.open(self,mode)
-        rescue Exception => e
-          add_validation_failure ValidationFailure.f(:message_template=>%{Couldn't open "#{File.basename(self)}" - }+
-            e.message, :type=>:couldnt_open_file)  # @TODO does this reveal system info crap?
-          return self
-        end
-        open_struct_data = {:fh => fh, :filename => self}
-        It.changed_type(OpenStruct.new(open_struct_data), self)
-      end
-    end
     class Elements  # just a wrapper for elements_by_name, elements_by_type
       def initialize(command); @command = command end
-      def size; @command.switches_by_name.size; end
-      def each &block; @command.switches_by_name.each(&block) end
-      def all; @command.switches_by_name; end
-      def positional; @command.switches_by_type[Positional] end
-      alias_method :positionals, :positional
-      def option; @command.switches_by_type[Switch] end
-      alias_method :options, :option
-      alias_method :switches, :option
-      alias_method :switch,   :option
-      def required; @command.switches_by_type[Required] end
-      alias_method :requireds, :required
-      def optional; @command.switches_by_type[Optional] end
-      alias_method :optionals, :optional
+      def size;                @command.switches_by_name.size; end
+      def each &block;         @command.switches_by_name.each(&block) end
+      def all;                 @command.switches_by_name; end
+      def positionals;         @command.switches_by_type[Positional] end
+      def options;             @command.switches_by_type[Switch] end
+      def requireds;           @command.switches_by_type[Required] end
+      def optionals;           @command.switches_by_type[Optional] end
       # splat is always only zero or one element, no need for plural alias
       def splat; @command.switches_by_type[Splat].size > 0 ? @command.switches_by_type[Splat][0] : false end
+      alias_method :switches,   :options
+      def method_missing(name,*args)
+        if (name=[%{#{name}s},%{#{name}es}].detect{|x| respond_to?(x)}) then return self.send(name,*args) end
+        raise NoMethodError.new("undefined method `#{name}' for #{self.inspect}")
+      end
+    end
+    module CommandLike # probably no reason to be a module
+      attr_accessor :app_instance
+      attr_reader :description
+      def take_names(o) # take the contents of a parse tree containing main_name, long_name, etc
+        o.instance_variable_get('@table').each do |name,value|   # see CommandFactory#parse_grammar
+          instance_variable_set(%{@#{name}}, value)
+        end
+      end
+      def main_name; @main_name end
+      def full_name # always return a string here! optparse wants it for length()
+        %{#{@app_instance.cli.command_prefix}#{main_name}}
+      end
+      def as_method_name; main_name.to_s.gsub('-','_').downcase.to_sym end
+      def desc_arr  # if we wanna be like optparse, return an array.
+        return [] unless @description
+        Hipe::AsciiTypesetting::FormattableString.new(@description).word_wrap!(39).split("\n") # @todo
+      end
     end
     class Command
       attr_reader :option_parser, :switches_by_name, :switches_by_type # for testing and debugging only
@@ -522,6 +515,10 @@ module Hipe
         end
         @elements
       end
+      def parse_definition(univ_values = nil)
+        definition = Hipe::Cli.definition_proc(nil, univ_values)
+        instance_eval(&definition)
+      end
       def help_switch
         elements.switches.each do |s|
           return '-h' if s.short.include?('-h')
@@ -529,64 +526,16 @@ module Hipe
         end
         return nil
       end
-      # because of the crazy nature of the code blocks this needs to be run for each call to run()
-      # @return [OptionValues] the hash that is in scope when you made the definition
-      # @post_condition: @definitions, @switches_by_name, @switches_by_type get set.  Not ordered for now.
-      def parse_definition
-        @prev = nil
-        opt_values = OptionValues.new     # is in scope below for switches to write their results to
-        @definitions = []                 # gets populated below when we instance_eval our definition block
-        @switches_by_name = {}            # hold on to each switch that OptParser builds
-        @switches_by_type = {
-          Switch=>[], Positional=>[],
-          Required=>[], Optional=>[],
-          Splat=>[]  #never more than one element in here
-        }
-        return opt_values if @block.nil?  # some commands have no definition at all.  then what what am i even doing here?
-        pass_this_to_op = lambda do |opts| # build all the switches for options, required, optionals, splat in one go
-          @option_parser = opts           # is made available thru opts() so definitions can e.g. opts.separator()
-          self.instance_eval(&@block)     # runs all the option(), required(), optional(), splat() definitions
-          @definitions.each do |my_info|  # with each one of those definition we 'recoreded' ...
-            first_arg = my_info.first_arg.to_s
-            unless /^-/ =~ first_arg
-              first_arg = %{--#{first_arg} VALUE} # positional arguments will need proper names and parameters
-            end                           # only for their construction (hack alert!)
-            switch = opts.define(first_arg,*my_info.list,&my_info.block) # make an optional, required, option, etc.
-            my_info.command = self
-            switch = my_info.hipe_type.enhance_switch(switch, my_info)  # for now it returns the same object but maybe not later
-            @switches_by_type[switch.hipe_type] << switch
-            if (Positional===switch)
-              @switches_by_type[Positional] << switch  # like an abstract base class. never the actual hipe_type
-            end
-            @switches_by_name[switch.main_name] = switch
-            orig_block = switch.block
-            new_block = Proc.new() do |it|
-              if orig_block
-                It.make_it_an_It(it, self, switch)
-                result_from_original = orig_block.call(it)
-                opt_values[switch.main_name] = result_from_original
-              else
-                opt_values[switch.main_name] = it
-              end
-            end
-            switch.instance_variable_set('@block',new_block)
-          end
-        end
-        OptionParser.new(&pass_this_to_op) # really confusing -- a bunch of stuff above in this scope gets set
-        opt_values
-      end
-
       def add_validation_failure(validation_failure)
         validation_failure.command ||= self
         @validation_failures.push(validation_failure)
       end
-
-      def run(argv)
+      def run(argv,univ_values = nil)
         @validation_failures = []
         ret = nil
         begin
-          return run_with_application(argv) unless @block #if there is no definition block we pass the args raw
-          opt_values = parse_definition
+          return run_with_application(argv,univ_values) unless @block #if there is no definition block we pass the args raw
+          opt_values = parse_definition(univ_values)
           ret = catch(:interrupt_validation) do # some options throw it so the rest of the thing isn't validated
             sws = @switches_by_type
             if (sw = sws[Switch].select{|x| x.has_default? }).size>0 then apply_defaults(sw, argv) end
@@ -600,7 +549,7 @@ module Hipe
             missing = (sws[Required].map{|x| x.main_name} - opt_values.keys).map{|x| @switches_by_name[x]}
             error_missing(missing) if missing.size > 0
             error_needless(argv) if (argv.size > 0)
-            args_for_implementer = flatten_args(sws, Hipe::OpenStructLike[opt_values])
+            args_for_implementer = flatten_args(sws, Hipe::OpenStructLike[opt_values],!!univ_values)
             throw(:interrupt_validation,:validation_failures) if @validation_failures.size > 0
             ret = run_with_application(args_for_implementer)
           end
@@ -623,12 +572,12 @@ module Hipe
           argv.concat( (x.long.size > 0 ) ? [x.long[0], x.default ] : [%{#{x.short[0]}#{x.default}}] )
         end
       end
-      def flatten_args(switches, opt_values)
+      def flatten_args(switches, opt_values, univ_values_defined)
         arg_array = []
         switches[Positional].each do |switch|
           arg_array << opt_values.delete(switch.main_name) # ok if nil
         end
-        if (switches[Switch].size > 0)
+        if (switches[Switch].size > 0 || univ_values_defined)
           arg_array << opt_values # even if it is empty, but not if there were no options in the definition
         end
         arg_array
@@ -677,38 +626,30 @@ module Hipe
         end
       end
       @fsa = {
-        :options               => [nil, :options],
-        %s{required arguments} => [nil, :options, %s{required arguments}],
-        %s{optional arguments} => [nil, :options, %s{required arguments}, %s{optional arguments}],
-        %s{splat definition}   => [nil, :options, %s{required arguments}]
+        %s{options}            => [nil, %s{options}],
+        %s{required arguments} => [nil, %s{options}, %s{required arguments}],
+        %s{optional arguments} => [nil, %s{options}, %s{required arguments}, %s{optional arguments}],
+        %s{splat definition}   => [nil, %s{options}, %s{required arguments}]
       }
       class << self
         def valid_state_change?(prev,current)
           @fsa[current].include? prev
         end
       end
-      def define(state_symbol, mod, name, list, block)
+      def define(state_symbol, type_module, name, list, block)
         unless (@prev.nil? or Command.valid_state_change?(@prev, state_symbol))
           raise Exception.f(%{#{state_symbol} should not appear after #{@prev}})
         end
         @prev = state_symbol
-        # find any hashes that do not follow arrays and assert there is no more then one... then make it an opts hash
-        opt_hashes = []
-        i = nil
-        list.each_with_index do |val, i|
-          if (Hash===val and i==0 || !(Array===list[i-1]))
-            opt_hashes << val
-          end
-        end
-        if (opt_hashes.size > 0)
-          raise Exception.f(%{Cannot have more than one options hash for "#{name}"}) if opt_hashes.size > 1
-          opt_hash = list.slice!(i,1)[0]
-        end
-        definition = {:hipe_type=>mod, :first_arg => name, :list => list, :block => block, :opt_hash=>opt_hash}
-        @definitions << OpenStruct.new(definition)
+        @definitions << Hipe::Cli.make_definition(type_module,name,list,block)
       end
-      def run_with_application(argv)
+      def run_with_application(argv,univ_values=nil)
         if @app_instance.respond_to?(as_method_name)
+          if (univ_values) # then there were no command-level options defined and the implementer can decide if it wants these
+            debugger
+            arity = @app_instance.method(as_method_name).arity
+            argv << univ_values if arity.abs >= (argv.length + 1)
+          end
           begin
             @app_instance.send(as_method_name, *argv)
           rescue ArgumentError => e
@@ -874,5 +815,96 @@ module Hipe
       end
     end
     class GrammarGrammarException < Exception; end
+    module BuiltinPredicates
+      It.register_predicates(self)
+      def must_match_regexp(re, message_template=nil)
+        if (md = re.match(self))
+          if (md.captures.size > 0)
+            it = md.captures
+            It.changed_type(it, self)
+          else
+            # it passed and there's no captures.  fall thru
+            it = self
+          end
+        else
+          message_template ||= %{%human_name% "%provided_value%" does not match the correct pattern}
+          add_validation_failure ValidationFailure.f(:message_template=>message_template, :type=>:regexp_failure)
+          it = self
+        end
+        it
+      end
+      def must_match(pattern,*etc) # magic alert!
+        method_man = 'must_match_'+pattern.class.to_s.gsub(/::/,'__').gsub(/([a-z])([A-Z])/,'\1_\2').downcase
+        send(method_man,pattern,*etc)
+      end
+      def must_be_float(message_template=nil)
+        if /^-?\d+\.?\d*$/.match(to_s)
+          it = to_f
+          It.changed_type(it, self)
+        else
+          message_template ||= %{Your value for %human_name% ("%provided_value%") does not appear to be a float}
+          add_validation_failure ValidationFailure.f(:message_template=>message_template,:type=>:float_cast_failure)
+          it = self
+        end
+        it
+      end
+      # this thing casts it to a fixnum so it must be the last predicate
+      def must_be_integer(message_template=nil)
+        if /^-?\d+$/.match(to_s)
+          it = to_i
+          It.changed_type(it, self)
+        else
+          message_template ||= %{Your value for %human_name% ("%provided_value%") does not appear to be an integer}
+          add_validation_failure ValidationFailure.f(:message_template=>message_template,:type=>:integer_cast_failure)
+          it = self
+        end
+        it
+      end
+      # this assertion implies that the thing must be a float (maybe it must be an integer, too!) but it does no casting.
+      def must_match_range(range,message_template=nil)
+        if ! (md = /^-?\d+(?:\.?\d+)?$/=~self)
+          message_template ||= %{%human_name% must be numeric}
+          add_validation_failure ValidationFailure.f(:message_template=>message_template, :type=>:range_failure)
+        else
+          as_number = self.to_f
+          if ! (range===as_number)
+            message_template ||= if as_number < range.begin
+              %{%provided_value% is too low a value for %human_name%.  It can't be below #{range.end}}
+            else
+              %{%provided_value% is too high a value for %human_name%.  It can't be above #{range.end}}
+            end
+            add_validation_failure ValidationFailure.f(:message_template=>message_template, :type=>:range_failure)
+          end
+        end
+        self
+      end
+      def must_exist!(message_template=nil) # as a file
+        unless (File.exist?(self))
+          message_template ||= %{File not found: "#{self}"}
+          add_validation_failure ValidationFailure.f(:message_template=>message_template,:type=>:file_not_found)
+          throw(:interrupt_validation, :validation_failures)
+        end
+        self
+      end
+      def must_not_exist!(message_template=nil,interrupt_if_exists=false) # as a file
+        if (File.exist?(self))
+          message_template ||= %{File must not exist: "#{self}"}
+          add_validation_failure ValidationFailure.f(:message_template=>message_template,:type=>:file_exists)
+          throw(:interrupt_validation, :validation_failures)
+        end
+        self
+      end
+      def gets_opened(mode) # for a file, @return new Openstruct It with fh (filehandle) and filename
+        begin
+          fh = File.open(self,mode)
+        rescue Exception => e
+          add_validation_failure ValidationFailure.f(:message_template=>%{Couldn't open "#{File.basename(self)}" - }+
+            e.message, :type=>:couldnt_open_file)  # @TODO does this reveal system info crap?
+          return self
+        end
+        open_struct_data = {:fh => fh, :filename => self}
+        It.changed_type(OpenStruct.new(open_struct_data), self)
+      end
+    end
   end
 end
