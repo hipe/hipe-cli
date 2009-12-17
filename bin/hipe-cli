@@ -1,0 +1,193 @@
+#!/usr/bin/env ruby
+# -*- mode: ruby -*-
+
+require File.expand_path('../../lib/hipe-cli',__FILE__)
+require 'orderedhash'
+require 'json'
+require 'hipe-core/io/buffer-string'
+
+Hipe::Cli::Exception.graceful_list << Hipe::Cli::GrammarGrammarException
+
+class HipeCliHelper
+  include Hipe::Cli
+  cli.does('-h','--help', 'help<<self')
+  cli.out.class = Hipe::Io::GoldenHammer
+  cli.default_command = :help
+  cli.does(:aliases, "outputs the lines to make aliases for each of the"+
+                    " example applications in the examples folder.  If you want to "+
+                    "get really crazy you can put them in your .bashrc") do |x|
+    option('-h',&help) 
+    option('-l','--list', 'just list the names of the alises.')
+  end
+  def aliases(opts)
+    exes = []
+    shorts = []
+    Dir[Hipe::Cli::DIR+'/examples/*'].each do |fn| 
+      next unless (md = /app-([a-z]+\d+)[-a-z]*\.rb$/.match(fn))
+      number = md[1]
+      exes <<  %{alias #{number}='#{fn}'}
+      shorts << number
+    end
+    if opts.list
+      puts "please select from among these glorious apps:\n"
+      puts shorts.sort.join(' ')
+    else
+      puts "# copy paste these and run them in your shell or put them in your .bashrc to make the aliases:"
+      puts exes.join "\n"
+      puts"# done.\n"
+    end
+  end
+  
+  cli.does(:gentest, "generate tests from copy-pasted terminal output"){
+    option('-h','--help','help<<self', &help)
+    option('-p','--prefix MODULE_PREFIX','for your class',:default=>'')
+    option('-l','--list',"choose from a list of files in the default folder."){|x| goto{ app_instance.gentest_list(opt_values,x) } }
+    option('-c','--comment-delimiters A,B,C', "empty string for no comments allowed. default '#'",:default=>'#')
+    required('INPUT_FILE', 'the file of copy-pasted terminal stuff'){ |it|
+      it.must_exist!.gets_opened('r')
+    }
+  }
+  def gentest(infile, opts)
+    pwd = File.expand_path(Dir.pwd)
+    require File.join( Hipe::Cli::DIR, 'spec','bacon-helper.rb' )
+    json = OpenStruct.new( JSON.parse(infile.fh.gets) )
+    bn = File.basename(infile.filename)
+    md = bn.match(/^([^\.]+).screenshots$/)
+    raise Exception.f(%{please rename #{bn} to match the pattern "*.screenshots"}) unless md
+    filename_inner = md.captures[0]
+    parsed = parse_file(infile,json)
+    @out = Hipe::Io::BufferString.new
+    if json.cls
+      cls = json.cls
+      desc = json.desc || 'generated test'
+      ltr = json.ltr || 't'
+    else
+      cls, desc = /^app-([^-]+)-([^\.]+)$/.match(json.app_file).captures 
+      ltr = cls
+      cls = opts.prefix+'App'+cls.capitalize
+    end
+    outfile = File.join(File.expand_path('.'),'spec',%{spec_#{filename_inner}-genned.rb})
+    fn = ''
+    
+    run_it_with_this = %{bacon spec/spec_#{filename_inner}-genned.rb}
+    putz <<-HERE.gsub(/^    /,'')
+    # #{run_it_with_this}
+    require File.expand_path('../bacon-helper', __FILE__)
+    HERE
+    if json.require
+      putz %{require '#{json.require}'}
+    else
+      putz %{require Hipe::Cli::DIR+'/examples/#{json.app_file}.rb'}
+    end
+    
+    putz <<-HERE.gsub(/^      /,'')
+
+
+      # You may not want to edit this file.  It was generated from data in "#{File.basename(infile.filename)}"
+      # by #{cli.program_name} gentest.  If tests are failing here, it means that either 1) the gentest generated 
+      # code that makes tests that fail (it's not supposed to do this), 2) That there is something incorrect in
+      # your "screenshot" data, or 3) that your app or hipe-cli has changed since the screenshots were taken
+      # and the tests generated from them.
+      # So, if the tests are failing here (and assuming gentest isn't broken), fix your app, get the output you want,
+      # make a screenshot (i.e. copy-paste it into the appropriate file), and re-run gentest, run the generated test,
+      # an achieve your success that way.  It's really that simple.
+      
+      
+    HERE
+    
+      
+    putz %{describe "#{desc.capitalize.gsub('-',' ')} (generated tests)" do}
+    puts %{\n\n(each call to shell! to parse the argv takes ~0.5 seconds!?)}
+    i = 0
+    parsed.each do |test_input, data|
+      output_lines = data.response
+      comment = data.comment
+      i += 1      
+      argv = Hipe.shell!(test_input)
+      putz "\n"
+      putz %{  it "#{comment||'should work'} (#{ltr}-#{i})" do}
+      argv = Hipe.shell!(test_input); print('.')
+      argv.shift # app name
+      putz %{    @app = #{cls}.new } if (1==i  or json.app_regen)
+      if json.direct
+        cmd = argv.shift        
+        putz %{    x = @app.cli.commands["#{cmd}"].run(#{argv.inspect})}
+      else
+        putz %{    x = @app.cli.run(#{argv.inspect})}
+      end
+      putz <<-HERE1.gsub(/^  /,'')
+      y =<<-__HERE__.gsub(/^      /,'').chomp
+        #{output_lines.join("\n        ")}
+      __HERE__
+      HERE1
+      if json.chomp == false
+        putz %{    x.to_s.should.equal y}
+      else
+        putz %{    x.to_s.chomp.should.equal y}        
+      end
+      putz %{  end}
+    end
+    putz %{end}
+    File.open(outfile,'w'){|fh| fh.write @out.read }
+    %{\nGenerated spec file:\n#{outfile}\n}+
+    %{Try running the generated test with:\n\n#{run_it_with_this}\n\n}
+  end
+  def parse_file(infile,opts)
+    prompt = opts.prompt
+    comment_re = /^ *# ?(.+)/
+    parsed = OrderedHash.new  
+    request = response = last_comment = nil
+    re = Regexp.new('^'+Regexp.escape(prompt)+'(.+)')
+    infile.fh.each_line do |line|
+      puts line      
+      next if (''== line.chomp! )  
+      if (md = comment_re.match(line))
+        last_comment = md[1]
+      elsif (md = re.match(line))
+        unless (response.nil?)
+          parsed[request] = OpenStruct.new({:response => response, :comment => last_comment})
+          last_comment = nil
+        end
+        request = md[1]
+        response = []                
+      else
+        if (response.nil?)
+          raise %{First line of file must match regex. \nPromptString: }+
+            %{"#{prompt}"\nRegexp: #{re}\nFirst Line:<<<<<<#{line}>>>>>>}
+        end
+        response << line
+      end
+    end
+    parsed[request] = OpenStruct.new({:response => response, :comment => last_comment})
+    parsed
+  end
+  
+  def gentest_list(opts,thing)
+    out = cli.out.new
+    default_location = 'spec/gentest-screenshots'
+    list = Dir[File.join(default_location,'/*')]
+    out.puts "Pick a screenshot file to regen:\n\n"
+    list.each_with_index do |filename, i|
+      out.puts %{#{i}) #{filename}}
+    end
+    puts out.read
+    puts "\n\nchoose a number or enter anything else to quit: "
+    thing = $stdin.gets.chop
+    if /^\d+/ =~ thing and list[thing.to_i]
+      o = OpenStruct.new(:filename => list[thing.to_i])
+      o.fh = File.open(o.filename,'r')
+      return gentest(o,opts)
+    else
+      puts "thank you."
+    end
+    ''
+  end
+  
+  def putz x
+    @out.puts x
+  end
+  
+  
+end
+
+puts HipeCliHelper.new.cli.run(ARGV) if File.basename($PROGRAM_NAME) == File.basename(__FILE__)
