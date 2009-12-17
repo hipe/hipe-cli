@@ -13,7 +13,7 @@ require Hipe::Cli::DIR+'/examples/app-it3-predicates.rb'
 # an achieve your success that way.  It's really that simple.
 
 
-describe "predicates (generated tests)" do
+describe "Predicates (generated tests)" do
 
   it "i need to know how many olives you want, juila. (it3-1)" do
     @app = AppIt3.new

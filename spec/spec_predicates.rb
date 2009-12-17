@@ -116,10 +116,26 @@ class AppPred3
   end
 end
 
+class AppPred4;
+  include Hipe::Cli
+  cli.does('this') do
+    option('--thiz') do |it|
+      it.must_blah_blah()
+    end
+  end
+  def this(opts); 'xyzzy' end
+end
+
+
 describe "predicates" do
   it "you can throw validation failures from your implementing method (of course!) (pred3)" do
     @app = AppPred3.new
     rs = @app.cli.run(['command_level_validation_failure'])
     rs.to_s.should == "your data is bad"
+  end
+
+  it "won't complain about bad predicates until it's much much much too late (pred4)" do
+    e = lambda{  AppPred4.new.cli.commands['this'].run(['--thiz']) }.should.raise(Hipe::Cli::GrammarGrammarException)
+    e.message.should.match(%r{Can't find predicate "must_blah_blah\(\)" anywhere.*Hipe::Cli::BuiltinPredicates})
   end
 end

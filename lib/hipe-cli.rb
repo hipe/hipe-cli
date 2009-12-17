@@ -10,7 +10,7 @@ require 'hipe-core/io/golden-hammer' # uh-oh
 
 module Hipe
   module Cli
-    VERSION = '0.0.8'
+    VERSION = '0.0.9'
     DIR = File.expand_path('../../',__FILE__) # only used by tests that use examples :/
     AppClasses = {}
     def self.included klass
@@ -86,7 +86,7 @@ module Hipe
         s << %{See "#{program_name} -h" for more info.\n} if @commands['-h']
         s
       end
-      def program_name; File.basename($0,'*.rb') end
+      def program_name; File.basename($0,'.*') end
       def help_recursive(argv,depth)
         return '' unless argv[0] =~ /^(?:-h|--help|-\?|help)$/
         if (depth == 0) then ret = %{Unfortunately there is no help if you want help on #{argv.shift}}
@@ -116,12 +116,11 @@ module Hipe
       def generate_banner
         lines = []
         lines <<  (%{#{program_name} - #{description}\n}) if description
-        left = %{usage: #{program_name} }
-        right = Hipe::AsciiTypesetting::FormattableString.new('')
-        right.replace( [@commands.select{|i,cmd| OptionyLookingCommand === cmd}.map do |c|
+        left = %{usage: #{program_name}}
+        right = Hipe::AsciiTypesetting::FormattableString.new( [
+          ' ' + @commands.select{|i,cmd| OptionyLookingCommand === cmd}.map{|c|
             '[' + ([c[1].short_name,c[1].long_name].compact * '|') + ']'
-          end * ' ', "COMMAND [OPTIONS] [ARG1 [ARG2 [...]]]"
-        ].compact * ' ')
+          }.uniq * ' ', ' COMMAND [OPTIONS] [ARG1 [ARG2 [...]]]'].select{|x| x.strip.length > 0}.join )
         right_column_width = [20, screen.width-left.length].max
         lines << left + right.word_wrap_once!(right_column_width)
         lines << right.word_wrap!(right_column_width).indent!(left.length) if right.size > 0
@@ -152,18 +151,22 @@ module Hipe
       end
       def [](aliaz)
         name = aliaz.to_s
+        name = @cli.default_command.to_s if (name=='' && @cli.default_command)
         if (cmd = super(@aliases[name]))
           cmd.app_instance = @cli.app_instance
           cmd
-        elsif name.include? ':'
-          plugin_name, remainder = /^([^:]+):(.+)/.match(name).captures
-          if (@cli.plugins[plugin_name])
-            @cli.plugins[plugin_name].cli.commands[remainder]
+        elsif name.include? ':' or (plugin = @cli.plugins[name])
+          if (plugin)
+            name = ''  # the command to the main app was the plugin name alone.  trigger its default command
           else
-            raise Exception.f( %{unrecognized plugin "#{plugin_name}". Known plugins are }+
-            Hipe::Lingual::List[@cli.plugins.map{|x| %{"#{x[1].cli.plugin_name}"} } ].and(),:type=>:unrecognized_plugin_name
-            )
+            plugin_name, name = /^([^:]+):(.+)/.match(name).captures
+            unless (plugin = @cli.plugins[plugin_name])
+              raise Exception.f( %{unrecognized plugin "#{plugin_name}". Known plugins are }+
+                Hipe::Lingual::List[@cli.plugins.map{|x| %{"#{x[1].cli.plugin_name}"} } ].and(),
+                :type=>:unrecognized_plugin_name)
+            end
           end
+          plugin.cli.commands[name]
         end
       end
       def each(&block)
@@ -261,11 +264,17 @@ module Hipe
         command.add_validation_failure(validation_failure)
       end
     end
-    module OptParseSwitch
+    module Switch # always an OptionParser switch, enhanced
       include CommandElement
       def self.enhance_switch(*args); CommandElement.enhance_switch(*args); end
+      def syntax
+        joinme = []
+        joinme << (@short[0] + (@long[0] ? '' : (@arg||''))) if @short[0]
+        joinme << (@long[0] + (@arg||'')) if @long[0]
+        %{[#{joinme.join('|')}]}
+      end
     end
-    module PositionalArgument
+    module Positional # a pseudo "abstract" "module" for required and optional
       include CommandElement
       def self.enhance_switch(*args); CommandElement.enhance_switch(*args); end
       def prepare_for_display
@@ -281,18 +290,18 @@ module Hipe
         prepare_for_display
       end
     end
-    module RequiredPositional;
-      include PositionalArgument
-      def self.enhance_switch(*args); PositionalArgument.enhance_switch(*args); end
+    module Required  # a required positional argument
+      include Positional
+      def self.enhance_switch(*args); Positional.enhance_switch(*args); end
       def set_default(val)
         raise Exception.f(%{required arguments can't have defaults ("#{main_name}")})
       end
     end
-    module OptionalPositional;
-      include PositionalArgument
-      def self.enhance_switch(*args); PositionalArgument.enhance_switch(*args); end
+    module Optional # an optional positional argument
+      include Positional
+      def self.enhance_switch(*args); Positional.enhance_switch(*args); end
     end
-    module Splat;
+    module Splat # always at the end of the grammar
       include CommandElement
       def self.enhance_switch(*args); CommandElement.enhance_switch(*args); end
     end
@@ -331,9 +340,6 @@ module Hipe
       def main_name; @main_name end
       def full_name # always return a string here! optparse wants it for length()
         %{#{@app_instance.cli.command_prefix}#{main_name}}
-      end
-      def human_name
-        @main_name.to_s.gsub(/-|_/,' ')
       end
       def as_method_name; main_name.to_s.gsub('-','_').downcase.to_sym end
       def desc_arr  # if we wanna be like optparse, return an array.
@@ -480,10 +486,29 @@ module Hipe
         It.changed_type(OpenStruct.new(open_struct_data), self)
       end
     end
+    class Elements  # just a wrapper for elements_by_name, elements_by_type
+      def initialize(command); @command = command end
+      def size; @command.switches_by_name.size; end
+      def each &block; @command.switches_by_name.each(&block) end
+      def all; @command.switches_by_name; end
+      def positional; @command.switches_by_type[Positional] end
+      alias_method :positionals, :positional
+      def option; @command.switches_by_type[Switch] end
+      alias_method :options, :option
+      alias_method :switches, :option
+      alias_method :switch,   :option
+      def required; @command.switches_by_type[Required] end
+      alias_method :requireds, :required
+      def optional; @command.switches_by_type[Optional] end
+      alias_method :optionals, :optional
+      # splat is always only zero or one element, no need for plural alias
+      def splat; @command.switches_by_type[Splat].size > 0 ? @command.switches_by_type[Splat][0] : false end
+    end
     class Command
+      attr_reader :option_parser, :switches_by_name, :switches_by_type # for testing and debugging only
       include CommandLike
       def initialize(names, &block)
-        @app_instance = nil
+        @definitions = @elements = @switches_by_name = @switches_by_type = @app_instance = @elements = nil
         @block = block
         take_names(names)
       end
@@ -491,14 +516,18 @@ module Hipe
         [@main_name.to_s]
       end
       def elements
-        parse_definition unless @switches_by_name
-        @switches_by_name
+        if @elements.nil?
+          parse_definition if (@definitions.nil?)
+          @elements = Elements.new(self)
+        end
+        @elements
       end
       def help_switch
-        help_option = elements.detect do |x|
-           OptParseSwitch===x[1] and x[1].short.include?('-h') or x[1].long.include?('--help')
+        elements.switches.each do |s|
+          return '-h' if s.short.include?('-h')
+          return '--help' if s.long.include?('--help')
         end
-        help_option ? ( help_option[1].short.size > 0 ? help_option[1].short[0] : help_option[1].long[0]) : nil
+        return nil
       end
       # because of the crazy nature of the code blocks this needs to be run for each call to run()
       # @return [OptionValues] the hash that is in scope when you made the definition
@@ -509,13 +538,12 @@ module Hipe
         @definitions = []                 # gets populated below when we instance_eval our definition block
         @switches_by_name = {}            # hold on to each switch that OptParser builds
         @switches_by_type = {
-          OptParseSwitch=>[], PositionalArgument=>[],
-          RequiredPositional=>[], OptionalPositional=>[],
+          Switch=>[], Positional=>[],
+          Required=>[], Optional=>[],
           Splat=>[]  #never more than one element in here
         }
         return opt_values if @block.nil?  # some commands have no definition at all.  then what what am i even doing here?
-        switches, switches_by_name = @switches_by_type, @switches_by_name # ladies prefer local variables
-        opts = OptionParser.new do |opts| # build all the switches for options, required, optionals, splat in one go
+        pass_this_to_op = lambda do |opts| # build all the switches for options, required, optionals, splat in one go
           @option_parser = opts           # is made available thru opts() so definitions can e.g. opts.separator()
           self.instance_eval(&@block)     # runs all the option(), required(), optional(), splat() definitions
           @definitions.each do |my_info|  # with each one of those definition we 'recoreded' ...
@@ -526,11 +554,11 @@ module Hipe
             switch = opts.define(first_arg,*my_info.list,&my_info.block) # make an optional, required, option, etc.
             my_info.command = self
             switch = my_info.hipe_type.enhance_switch(switch, my_info)  # for now it returns the same object but maybe not later
-            switches[switch.hipe_type] << switch
-            if (PositionalArgument===switch)
-              switches[PositionalArgument] << switch  # like an abstract base class. never the actual hipe_type
+            @switches_by_type[switch.hipe_type] << switch
+            if (Positional===switch)
+              @switches_by_type[Positional] << switch  # like an abstract base class. never the actual hipe_type
             end
-            switches_by_name[switch.main_name] = switch
+            @switches_by_name[switch.main_name] = switch
             orig_block = switch.block
             new_block = Proc.new() do |it|
               if orig_block
@@ -544,6 +572,7 @@ module Hipe
             switch.instance_variable_set('@block',new_block)
           end
         end
+        OptionParser.new(&pass_this_to_op) # really confusing -- a bunch of stuff above in this scope gets set
         opt_values
       end
 
@@ -558,20 +587,20 @@ module Hipe
         begin
           return run_with_application(argv) unless @block #if there is no definition block we pass the args raw
           opt_values = parse_definition
-          switches = @switches_by_type
           ret = catch(:interrupt_validation) do # some options throw it so the rest of the thing isn't validated
-            if (sw = switches[OptParseSwitch].select{|x| x.has_default? }).size>0 then apply_defaults(sw, argv) end
-            opts.parse!(argv) if switches[OptParseSwitch].size > 0
-            switches[PositionalArgument].each{|x| x.prepare_for_parse }  # bad hack.  now we need the dashes
-            if switches[PositionalArgument].size > 0
-              new_argv = turn_positionals_into_switches(switches[PositionalArgument], argv)
-              if (sw = switches[PositionalArgument].select{|x| x.has_default? }).size>0 then apply_defaults(sw, new_argv) end
+            sws = @switches_by_type
+            if (sw = sws[Switch].select{|x| x.has_default? }).size>0 then apply_defaults(sw, argv) end
+            opts.parse!(argv) if sws[Switch].size > 0
+            sws[Positional].each{|x| x.prepare_for_parse }  # bad hack.  now we need the dashes
+            if sws[Positional].size > 0
+              new_argv = turn_positionals_into_switches( sws[Positional], argv)
+              if (sw = sws[Positional].select{|x| x.has_default? }).size>0 then apply_defaults(sw, new_argv) end
               opts.parse!(new_argv)
             end
-            missing = (switches[RequiredPositional].map{|x| x.main_name} - opt_values.keys).map{|x| @switches_by_name[x]}
+            missing = (sws[Required].map{|x| x.main_name} - opt_values.keys).map{|x| @switches_by_name[x]}
             error_missing(missing) if missing.size > 0
             error_needless(argv) if (argv.size > 0)
-            args_for_implementer = flatten_args(switches, Hipe::OpenStructLike[opt_values])
+            args_for_implementer = flatten_args(sws, Hipe::OpenStructLike[opt_values])
             throw(:interrupt_validation,:validation_failures) if @validation_failures.size > 0
             ret = run_with_application(args_for_implementer)
           end
@@ -596,11 +625,11 @@ module Hipe
       end
       def flatten_args(switches, opt_values)
         arg_array = []
-        switches[PositionalArgument].each do |switch|
+        switches[Positional].each do |switch|
           arg_array << opt_values.delete(switch.main_name) # ok if nil
         end
-        if (switches[OptParseSwitch].size > 0)
-          arg_array << opt_values # even if it is empty
+        if (switches[Switch].size > 0)
+          arg_array << opt_values # even if it is empty, but not if there were no options in the definition
         end
         arg_array
       end
@@ -626,13 +655,26 @@ module Hipe
         e.reason = sp.say
         raise e
       end
-      def option   (name,*list,&block); define(%s{options},            OptParseSwitch,     name, list, block) end
-      def required (name,*list,&block); define(%s{required arguments}, RequiredPositional, name, list, block) end
-      def optional (name,*list,&block); define(%s{optional arguments}, OptionalPositional, name, list, block) end
+      def option   (name,*list,&block); define(%s{options},            Switch,     name, list, block) end
+      def required (name,*list,&block); define(%s{required arguments}, Required, name, list, block) end
+      def optional (name,*list,&block); define(%s{optional arguments}, Optional, name, list, block) end
       def splat    (name,*list,&block); define(%s{splat definition},   Splat,              name, list, block) end
       def opts; @option_parser; end
-      def help; # circumvent normal validation if the user wants to display help
-        lambda{ throw :interrupt_validation, @option_parser.to_s }
+      def help; # be sure to circumvent normal validation of the command if the user wants to display help for a command
+        lambda do
+          re = Regexp.new('Usage: '+Regexp.escape(app_instance.cli.program_name)+' \[options\]')
+          if  re =~ @option_parser.banner # if it's the default generated banner thing...
+            s = ''
+            s << %{#{full_name} - #{description}\n\n} if description
+            s << %{Usage: #{app_instance.cli.program_name} #{full_name}}
+            s << ' '+elements.switches.map{|x| x.syntax }.join(' ') if elements.switches.size > 0
+            s << ' '+elements.required.map{|x| x.main_name }.join(' ') if (elements.required.size > 0)
+            s << ' '+elements.optionals.map{|x| %{[#{x.main_name}]} }.join(' ') if (elements.optionals.size > 0)
+            s << ' '+%{[#{elements.splat.main_name} [#{elements.splat.main_name} [...]]]} if (elements.splat)
+            @option_parser.banner = s
+          end
+          throw :interrupt_validation, @option_parser.to_s
+        end
       end
       @fsa = {
         :options               => [nil, :options],
@@ -757,7 +799,7 @@ module Hipe
         if (@info.message_template)
           template_values = @info.instance_variable_get('@table').dup
           use_these = {:human_name => if @command_element then @command_element.human_name
-            elsif @command then @command.human_name
+            elsif @command then @command.main_name
             else; 'it' end,
            :provided_value => @info.provided_value ? @info.provided_value : 'provided value'
           }.merge template_values
@@ -792,8 +834,8 @@ module Hipe
         @command = cmd
         if "invalid argument" == reason
           detected = case @args[0]
-            when /^--/ then cmd.elements.detect{|x| x[1].long[0] == @args[0]}
-            when /^-([^-])/  then cmd.elements.detect{|x| x[1].short[0] == $1 }
+            when /^--/ then cmd.elements.all.detect{|x| x[1].long[0] == @args[0]}
+            when /^-([^-])/  then cmd.elements.all.detect{|x| x[1].short[0] == $1 }
           end
           @command_element = detected[1] if detected
         end

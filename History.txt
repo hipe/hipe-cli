@@ -1,7 +1,10 @@
-== 0.0.9 (the next bleeding edge version) or above will be:
+== 0.0.10 (the next bleeding edge version) or above will be:
   * splat
   * generated descriptions for command elements from dsl
   * generate banner (syntax) for individual commands
+== 0.0.9 (this bleeding edge version) is:
+  * plugins can now be requested by name with no subcommand (for default commands, etc)
+  * bugfix for showing -h too many times with plugins
 == 0.0.8 (this bleeding edge version) or above will be:
   * predicates with 98.44% coverage
   * removed output buffering class registration

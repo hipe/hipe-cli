@@ -13,7 +13,7 @@ require Hipe::Cli::DIR+'/examples/app-it4-all-builtin-predicates.rb'
 # an achieve your success that way.  It's really that simple.
 
 
-describe "all-builtin-predicates (generated tests)" do
+describe "All builtin predicates (generated tests)" do
 
   it "regexp fail (it4-1)" do
     @app = AppIt4.new
