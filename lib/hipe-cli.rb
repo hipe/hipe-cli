@@ -3,10 +3,10 @@ require 'ostruct'
 require 'rubygems'
 require 'ruby-debug'
 gem     'hipe-core', '0.0.2'
-require 'hipe-core/ascii-typesetting'
-require 'hipe-core/lingual'
-require 'hipe-core/open-struct-like'
-require 'hipe-core/io/golden-hammer' # uh-oh
+require 'hipe-core/lingual/ascii-typesetting'
+require 'hipe-core/lingual/en'
+require 'hipe-core/struct/open-struct-like'
+require 'hipe-core/io/golden-hammer'
 
 module Hipe
   module Cli
@@ -85,9 +85,16 @@ module Hipe
         opt_values
       end
     end
+    def self.apply_defaults(switches, argv)
+      shorts, longs = [], []
+      argv.grep(/(?:^(-[a-z0-9]))|(?:^(--[a-z0-9][-a-z0-9]+))/){|_| shorts<<$1 if $1; longs<<$2 if $2 }
+      switches.select{|x| (x.short & shorts).size == 0 and (x.long & longs).size == 0 }.each do |x|
+        argv.concat( (x.long.size > 0 ) ? [x.long[0], x.default ] : [%{#{x.short[0]}#{x.default}}] )
+      end
+    end
     class Cli
-      attr_reader :commands, :parent_cli, :output_registrar, :out, :universals
-      attr_accessor :description, :plugin_name, :default_command
+      attr_reader :commands, :parent_cli, :output_registrar, :out, :universals, :opts
+      attr_accessor :description, :plugin_name, :default_command, :program_name, :config
       def initialize(klass)
         @app_class = klass
         @app_instance = @plugins = @default_command = nil
@@ -126,41 +133,51 @@ module Hipe
         @plugins ||= Plugins.new(self)
       end
       alias_method :plugins, :plugin # hm
-      def load_plugins_from_dir(full_path,container_module)
-        require 'hipe-core/class-loader'
-        skip_file = (File.join full_path, 'ignore-list')
-        skip_list = File.exist?(skip_file) ? File.read(skip_file).split("\n") : []
-        files = Dir[File.join full_path, '*.rb']
-        raise Exception.f(%{no plugins in directory: "#{full_path}"}) unless files.size > 0
-        files.each do |filename|
-          next if skip_list.include?(File.basename(filename))
-          plugins << Hipe::ClassLoader.from_file!(filename,container_module)
-        end
-      end
       def command_prefix
         @plugin_name ? %{#{@parent_cli.command_prefix}#{@plugin_name}:} : nil
+       end
+      def universals
+        parse_universals if @switches_by_name.nil?
+        @switches_by_name
+      end
+      def parse_universals
+        definition = Hipe::Cli.definition_proc(@universals)
+        instance_eval(&definition)
+      end
+      def parse_universal_values(argv)
+        univ_values = parse_universals
+        Hipe::OpenStructLike.enhance(univ_values)
+        # oh boy..find the first instance of a token in argv that looks like a switch for which we
+        # have no corresponding short or long switch.
+        univ = @switches_by_name.values.map{|x| x.short + x.long }.flatten
+        idx = argv.find_index{|x| (md=/^(-[a-z0-9])|(--[a-z0-9][-a-z0-9_]*)/i.match(x)) && (univ & md.captures).size == 0}
+        later = (idx) ? argv.slice!(idx, argv.size-idx) : []
+        if ((sw=@switches_by_name.values.select{|x| x.has_default?}).size > 0) then Hipe::Cli.apply_defaults(sw, argv) end
+        @option_parser.parse!(argv)
+        argv.concat(later)
+        univ_values
       end
       def run argv # cli
-        univ_values = if (@universals.size>0)
-          definition = Hipe::Cli.definition_proc(@universals)
-          univ_values = instance_eval(&definition)
-          # oh boy..find the first instance of a token in argv that looks like a switch for which we have no corresponding
-          # short or long switch.
-          univ = @switches_by_name.values.map{|x| x.short + x.long }.flatten
-          idx = argv.find_index{|x| (md=/^(-[a-z0-9])|(--[a-z0-9][-a-z0-9_]*)/i.match(x)) && (univ & md.captures).size == 0}
-          idx ||= 0
-          later = argv.slice!(idx, argv.size-idx)
-          @option_parser.parse!(argv)
-          Hipe::OpenStructLike.enhance(univ_values)
-          argv.concat(later)
-          univ_values
-        end
-        if (cmd = @commands[name = (argv.shift || @default_command)])
-          rs = cmd.run(argv,univ_values)
-          rs.execution_context = :cli if rs.respond_to?("execution_context=")
-          rs.nil? ? '' : rs
-        else
-          bad_command(name)
+        begin
+          univ_values = parse_universal_values(argv) if (@universals.size>0)
+          @opts = univ_values
+          @app_instance.before_run if @app_instance.respond_to?(:before_run)
+          if (cmd = @commands[name = (argv.shift || @default_command)])
+            rs = cmd.run(argv,univ_values)
+            rs.execution_context = :cli if rs.respond_to?("execution_context=")
+            rs.nil? ? '' : rs
+          else
+            bad_command(name)
+          end
+        rescue ::Exception => e
+          if Exception.graceful_list?(e)
+            e = ParseErrorExtension.enhance_if_necessary(e,self)
+            ret = ValidationFailures.new([e])
+            ret.execution_context = :cli
+            return ret
+          else
+            raise e
+          end
         end
       end
       def bad_command(name)
@@ -170,7 +187,9 @@ module Hipe
         s << %{See "#{program_name} -h" for more info.\n} if @commands['-h']
         s
       end
-      def program_name; File.basename($0,'.*') end
+      def program_name
+        @program_name || (@parent_cli ? @parent_cli.program_name : File.basename($0,'.*'))
+      end
       def help_recursive(argv,depth)
         return '' unless argv[0] =~ /^(?:-h|--help|-\?|help)$/
         if (depth == 0) then ret = %{Unfortunately there is no help if you want help on #{argv.shift}}
@@ -202,9 +221,11 @@ module Hipe
         lines <<  (%{#{program_name} - #{description}\n}) if description
         left = %{usage: #{program_name}}
         right = Hipe::AsciiTypesetting::FormattableString.new( [
+          ' ' + universals.values.map{|x|%{#{x.syntax}} } * ' ',
           ' ' + @commands.select{|i,cmd| OptionyLookingCommand === cmd}.map{|c|
             '[' + ([c[1].short_name,c[1].long_name].compact * '|') + ']'
-          }.uniq * ' ', ' COMMAND [OPTIONS] [ARG1 [ARG2 [...]]]'].select{|x| x.strip.length > 0}.join )
+          }.uniq * ' ',
+          ' COMMAND [OPTIONS] [ARG1 [ARG2 [...]]]'].select{|x| x.strip.length > 0}.join )
         right_column_width = [20, screen.width-left.length].max
         lines << left + right.word_wrap_once!(right_column_width)
         lines << right.word_wrap!(right_column_width).indent!(left.length) if right.size > 0
@@ -270,11 +291,7 @@ module Hipe
     module CommandFactory
       def self.command_factory(name, *list, &block)
         o = parse_grammar(name,*list)
-        if (o.short_name || o.long_name)
-          OptionyLookingCommand.new(o, &block)
-        else
-          Command.new(o, &block)
-        end
+        (o.short_name || o.long_name) ? OptionyLookingCommand.new(o, &block) : Command.new(o, &block)
       end
       LONG_NAME_WITHOUT_ARGS = /^--([-_a-z0-9]+)/i
       # optparse does something similar, too but we don't use it to parse commands themselves because
@@ -497,8 +514,14 @@ module Hipe
         Hipe::AsciiTypesetting::FormattableString.new(@description).word_wrap!(39).split("\n") # @todo
       end
     end
+    class Interrupt < OpenStruct
+      def self.[](hash)
+        me = self.new(hash)
+        throw :interrupt_validation, me
+      end
+    end
     class Command
-      attr_reader :option_parser, :switches_by_name, :switches_by_type # for testing and debugging only
+      attr_reader :option_parser, :switches_by_name, :switches_by_type, :opt_values # for testing and debugging only
       include CommandLike
       def initialize(names, &block)
         @definitions = @elements = @switches_by_name = @switches_by_type = @app_instance = @elements = nil
@@ -532,45 +555,48 @@ module Hipe
       end
       def run(argv,univ_values = nil)
         @validation_failures = []
-        ret = nil
+        ret = opt_values = args_for_implementer = nil  #@TODO SEE WHAT BREAKS IF YOU MAKE THIS A MEMBER VARIABLE
         begin
           return run_with_application(argv,univ_values) unless @block #if there is no definition block we pass the args raw
           opt_values = parse_definition(univ_values)
-          ret = catch(:interrupt_validation) do # some options throw it so the rest of the thing isn't validated
+          Hipe::OpenStructLike[opt_values]
+          ret = catch(:interrupt_validation) do
             sws = @switches_by_type
-            if (sw = sws[Switch].select{|x| x.has_default? }).size>0 then apply_defaults(sw, argv) end
+            if (sw = sws[Switch].select{|x| x.has_default? }).size>0 then Hipe::Cli.apply_defaults(sw, argv) end
             opts.parse!(argv) if sws[Switch].size > 0
             sws[Positional].each{|x| x.prepare_for_parse }  # bad hack.  now we need the dashes
             if sws[Positional].size > 0
               new_argv = turn_positionals_into_switches( sws[Positional], argv)
-              if (sw = sws[Positional].select{|x| x.has_default? }).size>0 then apply_defaults(sw, new_argv) end
+              if (sw = sws[Positional].select{|x| x.has_default? }).size>0 then Hipe::Cli.apply_defaults(sw, new_argv) end
               opts.parse!(new_argv)
             end
             missing = (sws[Required].map{|x| x.main_name} - opt_values.keys).map{|x| @switches_by_name[x]}
             error_missing(missing) if missing.size > 0
             error_needless(argv) if (argv.size > 0)
-            args_for_implementer = flatten_args(sws, Hipe::OpenStructLike[opt_values],!!univ_values)
-            throw(:interrupt_validation,:validation_failures) if @validation_failures.size > 0
+            args_for_implementer = flatten_args(sws, opt_values,!!univ_values)
+            Interrupt[:because=>:validation_failures] if @validation_failures.size > 0
+          end
+          unless Interrupt === ret
             ret = run_with_application(args_for_implementer)
           end
-        rescue OptionParser::ParseError => e
-          e = ParseErrorExtension.enhance_if_necessary(e,self)
-          ret = :validation_failures
-          @validation_failures << e
+        rescue ::Exception => e
+          if Exception.graceful_list?(e)
+            e = ParseErrorExtension.enhance_if_necessary(e,self)
+            ret = Interrupt.new(:because=>:validation_failures)
+            @validation_failures << e
+          else
+            raise e
+          end
         end
-        if (:validation_failures==ret)
-          # we didn't actually call to the implementing method because there were validation (predicate) failures
-          ret = ValidationFailures.new(@validation_failures)
+        if (Interrupt===ret)
+          ret = case ret.because
+            when :validation_failures then ValidationFailures.new(@validation_failures)
+            when :goto then @opt_values = opt_values; instance_eval(&ret.block)
+            when :done then ret.return
+            else ret end
           @validation_failures = nil # important.  command is supposed to be stateless ?
         end
         ret
-      end
-      def apply_defaults(switches, argv)
-        shorts, longs = [], []
-        argv.grep(/(?:^(-[a-z0-9]))|(?:^(--[a-z0-9][-a-z0-9]+))/){|_| shorts<<$1 if $1; longs<<$2 if $2 }
-        switches.select{|x| (x.short & shorts).size == 0 and (x.long & longs).size == 0 }.each do |x|
-          argv.concat( (x.long.size > 0 ) ? [x.long[0], x.default ] : [%{#{x.short[0]}#{x.default}}] )
-        end
       end
       def flatten_args(switches, opt_values, univ_values_defined)
         arg_array = []
@@ -604,6 +630,8 @@ module Hipe
         e.reason = sp.say
         raise e
       end
+
+      # the below are the official "api" methods that command elements should know exist:
       def option   (name,*list,&block); define(%s{options},            Switch,     name, list, block) end
       def required (name,*list,&block); define(%s{required arguments}, Required, name, list, block) end
       def optional (name,*list,&block); define(%s{optional arguments}, Optional, name, list, block) end
@@ -611,7 +639,8 @@ module Hipe
       def opts; @option_parser; end
       def help; # be sure to circumvent normal validation of the command if the user wants to display help for a command
         lambda do
-          re = Regexp.new('Usage: '+Regexp.escape(app_instance.cli.program_name)+' \[options\]')
+          cli = app_instance.cli
+          re = Regexp.new('Usage: '+Regexp.escape(cli.program_name)+' \[options\]')
           if  re =~ @option_parser.banner # if it's the default generated banner thing...
             s = ''
             s << %{#{full_name} - #{description}\n\n} if description
@@ -622,9 +651,10 @@ module Hipe
             s << ' '+%{[#{elements.splat.main_name} [#{elements.splat.main_name} [...]]]} if (elements.splat)
             @option_parser.banner = s
           end
-          throw :interrupt_validation, @option_parser.to_s
+          Interrupt[:because=>:done, :return => @option_parser.to_s]
         end
       end
+      def goto(&block); Interrupt[:because=>:goto, :block=>block] end #appropriately named
       @fsa = {
         %s{options}            => [nil, %s{options}],
         %s{required arguments} => [nil, %s{options}, %s{required arguments}],
@@ -646,7 +676,6 @@ module Hipe
       def run_with_application(argv,univ_values=nil)
         if @app_instance.respond_to?(as_method_name)
           if (univ_values) # then there were no command-level options defined and the implementer can decide if it wants these
-            debugger
             arity = @app_instance.method(as_method_name).arity
             argv << univ_values if arity.abs >= (argv.length + 1)
           end
@@ -685,6 +714,7 @@ module Hipe
       alias_method :set, :[]= # necessary in [] because we rewrite the class with the instance using the same name
       def initialize(cli)
         @cli = cli
+        @dirs = nil
         super()
       end
       def <<(klass)
@@ -698,6 +728,7 @@ module Hipe
         super(name,value)
       end
       def [](name)
+        load_all!
         name = name.to_s
         return nil unless (plugin_class_or_app_instance = super(name))
         if (Class===plugin_class_or_app_instance)
@@ -708,6 +739,42 @@ module Hipe
         else
           return plugin_class_or_app_instance # assume it is app instance!
         end
+      end
+      def each(&block)
+        load_all!
+        super(&block)
+      end
+      def add_directory(full_path,container_module,opts={})
+        if opts[:lazy]
+          @dirs ||= []
+          @dirs << [full_path,container_module]
+        else
+          add_directory!(full_path, container_module)
+        end
+      end
+      def add_directory!(full_path,container_module)
+        require 'hipe-core/infrastructure/class-loader'
+        skip_file = (File.join full_path, 'ignore-list')
+        skip_list = File.exist?(skip_file) ? File.read(skip_file).split("\n") : []
+        files = Dir[File.join full_path, '*.rb']
+        raise Exception.f(%{no plugins in directory: "#{full_path}"}) unless files.size > 0
+        files.each do |filename|
+          next if skip_list.include?(File.basename(filename))
+          self << Hipe::ClassLoader.from_file!(filename,container_module)
+        end
+      end
+      def size
+        load_all!
+        super
+      end
+      protected
+      def load_all!
+        return unless @dirs        
+        @cli.app_instance.before_plugins_load if @cli.app_instance.respond_to?(:before_plugins_load)
+        @dirs.each do |arr|
+          add_directory!(arr[0],arr[1])
+        end
+        @dirs = nil
       end
     end
     class ValidationFailures < Hipe::Io::GoldenHammer
@@ -772,8 +839,9 @@ module Hipe
         e
       end
       def add_details(cmd)
+        return unless CommandLike === cmd
         @command = cmd
-        if "invalid argument" == reason
+        if respond_to?('reason') && "invalid argument" == reason
           detected = case @args[0]
             when /^--/ then cmd.elements.all.detect{|x| x[1].long[0] == @args[0]}
             when /^-([^-])/  then cmd.elements.all.detect{|x| x[1].short[0] == $1 }
@@ -793,6 +861,16 @@ module Hipe
       end
     end
     class Exception < ::Exception
+      @graceful_list = []
+      def self.graceful_list?(e)
+        @graceful_list.each do |mod|
+          return true if mod===e
+        end
+        false
+      end
+      class << self
+        attr_reader :graceful_list
+      end
       attr_reader :details
       protected
       def initialize(msg,details)
@@ -814,6 +892,7 @@ module Hipe
         klass.new(msg,details)
       end
     end
+    Exception.graceful_list << OptionParser::ParseError
     class GrammarGrammarException < Exception; end
     module BuiltinPredicates
       It.register_predicates(self)
@@ -882,7 +961,7 @@ module Hipe
         unless (File.exist?(self))
           message_template ||= %{File not found: "#{self}"}
           add_validation_failure ValidationFailure.f(:message_template=>message_template,:type=>:file_not_found)
-          throw(:interrupt_validation, :validation_failures)
+          Interrupt[:because => :validation_failures]
         end
         self
       end
@@ -890,14 +969,14 @@ module Hipe
         if (File.exist?(self))
           message_template ||= %{File must not exist: "#{self}"}
           add_validation_failure ValidationFailure.f(:message_template=>message_template,:type=>:file_exists)
-          throw(:interrupt_validation, :validation_failures)
+          Interrupt[:because =>:validation_failures]
         end
         self
       end
       def gets_opened(mode) # for a file, @return new Openstruct It with fh (filehandle) and filename
         begin
           fh = File.open(self,mode)
-        rescue Exception => e
+        rescue ::Exception => e
           add_validation_failure ValidationFailure.f(:message_template=>%{Couldn't open "#{File.basename(self)}" - }+
             e.message, :type=>:couldnt_open_file)  # @TODO does this reveal system info crap?
           return self

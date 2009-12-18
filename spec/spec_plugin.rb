@@ -4,7 +4,7 @@ require Hipe::Cli::DIR+'/examples/app-p1-plugins.rb'
 
 describe AppP1, "plugins" do
 
-  it "object graph (p1)" do
+  skipit "object graph (p1)" do
     @app4 = AppP4.new
     cli4 = @app4.cli
     lambda{ cli4.app_instance! }.should.not.raise
@@ -24,7 +24,7 @@ describe AppP1, "plugins" do
       cli.parent_cli.app_instance!.cli.parent_cli.app_instance!.equal?(@app4).should.equal true
   end
 
-  it "command should report a nice long name (p2)" do
+  skipit "command should report a nice long name (p2)" do
     cmd = @app4.cli.commands['app3:app2:app1:archipelago']
     name = cmd.full_name
     name.should.equal "app3:app2:app1:archipelago"
@@ -35,7 +35,7 @@ describe AppP1, "plugins" do
     name.should.equal "app3:app2:app1:archipelago"
   end
 
-  it "should have a good looking reflection (p3)" do
+  skipit "should have a good looking reflection (p3)" do
     @app3 = AppP3.new
     (@app3.cli.plugins.equal? @app3.cli.plugin).should.equal true
     @app3.cli.plugin[:app3].should.equal nil
@@ -45,7 +45,7 @@ describe AppP1, "plugins" do
     (app2_2.equal? app2).should.equal true
   end
 
-  it "should archipelagate (p4)" do
+  skipit "should archipelagate (p4)" do
     str = @app4.cli.run(['app3:app2:app1:archipelago', '--o1', 'O1VAL', 'REQ1VAL'])
     str.should.equal 'archi: "REQ1VAL", "O1VAL"'
   end
@@ -70,28 +70,46 @@ module Hipe::Cli::ModuleForTesting; end
 
 class AppP7
   include Hipe::Cli
-  cli.load_plugins_from_dir(File.join(Hipe::Cli::DIR,'spec','read-only','a-plugins-directory'),Hipe::Cli::ModuleForTesting)
+  cli.plugins.add_directory(File.join(Hipe::Cli::DIR,'spec',
+    'read-only','a-plugins-directory'),Hipe::Cli::ModuleForTesting
+  )
 end
 
 describe AppP6,' and AppP7' do
-  it "should be able to plugin with the left shift operator and just with a class (p5)" do
+  skipit "if you have a handle on your plugin class you can use the left shift operator (p5)" do
     e.should.equal nil
     @app = AppP6.new
     @app.cli.plugins['app-p5'].cli.app_instance!.should.be.kind_of DontBecomePartOfName::AppP5
   end
-  it "should fail on (p6)" do
+  skipit "should fail when you ask for an invalid plugin (p6)" do
     e = lambda { @app.cli.commands["not:there"] }.should.raise(Exception)
     e.message.should.match %r{unrecognized plugin "not". Known plugins are "app-p5"}i
   end
-  it "should load plugins from dir (p7)" do
+  skipit "should load plugins from dir (p7)" do
     app = AppP7.new
     app.cli.plugins.size.should.equal 2
     app.cli.plugin['plugin-a'].should.be.kind_of(Hipe::Cli)
   end
 end
 
+class AppP8LazyLoading
+  include Hipe::Cli
+  dir = File.join(Hipe::Cli::DIR,'spec','read-only','a-plugins-directory')
+  cli.plugins.add_directory(dir,Hipe::Cli::ModuleForTesting,:lazy=>true)
+end
 
-
-
-
-
+describe AppP8LazyLoading do
+  it "should be able to plugin with just a plugin directory (p8)" do
+    @app = AppP8LazyLoading.new
+    @app.cli.plugin['plugin-a'].should.be.kind_of(Hipe::Cli)
+  end
+  it "should fail on (p9)" do
+    e = lambda { @app.cli.commands["not:there"] }.should.raise(Hipe::Cli::GrammarGrammarException)
+    e.message.should.match %r{unrecognized plugin "not". Known plugins are "plugin-a"}i
+  end
+  it "should load plugins from dir (p10)" do
+    @app = AppP8LazyLoading.new
+    @app.cli.plugins.size.should.equal 2
+    @app.cli.plugin['plugin-a'].should.be.kind_of(Hipe::Cli)
+  end
+end
