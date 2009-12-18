@@ -1,7 +1,9 @@
 == 0.0.10 (the next bleeding edge version) or above will be:
   * splat
   * generated descriptions for command elements from dsl
-== 0.0.9 (this bleeding edge version) is:
+== 0.0.9 (this bleeding edge version) 
+  * Exceptions now support the idea of a "graceful list" -- land gracefully for these exceptions
+  * ridiculous ridiculous goto logic
   * app-level options (replacing OptionLikeCommands)
   * gentest generates bacon tests from command line input!
   * generate banner for individual commands

@@ -5,10 +5,13 @@ require File.expand_path('../../lib/hipe-cli',__FILE__)
 require 'orderedhash'
 require 'json'
 require 'hipe-core/io/buffer-string'
+require 'hipe-core/struct/open-struct-write-once-extension'
 
 Hipe::Cli::Exception.graceful_list << Hipe::Cli::GrammarGrammarException
 
 class HipeCliHelper
+  E = Hipe::Exception
+  GGE = Hipe::Cli::GrammarGrammarException
   include Hipe::Cli
   cli.does('-h','--help', 'help<<self')
   cli.out.class = Hipe::Io::GoldenHammer
@@ -40,75 +43,99 @@ class HipeCliHelper
   
   cli.does(:gentest, "generate tests from copy-pasted terminal output"){
     option('-h','--help','help<<self', &help)
-    option('-p','--prefix MODULE_PREFIX','for your class',:default=>'')
-    option('-l','--list',"choose from a list of files in the default folder."){|x| goto{ app_instance.gentest_list(opt_values,x) } }
-    option('-c','--comment-delimiters A,B,C', "empty string for no comments allowed. default '#'",:default=>'#')
+    option('-l','--list',"choose from a list of files in the default folder.") do
+      goto{ app_instance.gentest_list(opt_values) }
+    end    
     required('INPUT_FILE', 'the file of copy-pasted terminal stuff'){ |it|
       it.must_exist!.gets_opened('r')
     }
   }
+  
+  # abstract a file into a stack (or stream) of lines that you can either "peek" or "pop"
+  # maybe look at the FileString library that apeiros was working on  
+  # close the file when you get to the last line  
+  module ::Hipe::Io::StackOfLines # should check out github/apeiros/FileString and killerfox/File::Tie (Tie::File)
+    def self.[](io)
+  
+    def initialize(fh) 
+      raise "must be an open filehandle" unless (File === fh && ! fh.closed?)
+      @fh = fh
+      next 
+    end      
+    def pop; 
+      ret = @peek; 
+      next; 
+      ret; 
+    end
+    protected 
+    def stack_of_lines_ini
+    def next; 
+      @peek = @fh.gets 
+      @fh.close if @peek.nil?
+    end
+  end
+  
   def gentest(infile, opts)
+    opts.speed_up = true
     pwd = File.expand_path(Dir.pwd)
     require File.join( Hipe::Cli::DIR, 'spec','bacon-helper.rb' )
-    json = OpenStruct.new( JSON.parse(infile.fh.gets) )
-    bn = File.basename(infile.filename)
-    md = bn.match(/^([^\.]+).screenshots$/)
-    raise Exception.f(%{please rename #{bn} to match the pattern "*.screenshots"}) unless md
-    filename_inner = md.captures[0]
-    parsed = parse_file(infile,json)
-    @out = Hipe::Io::BufferString.new
-    if json.cls
-      cls = json.cls
-      desc = json.desc || 'generated test'
-      ltr = json.ltr || 't'
-    else
-      cls, desc = /^app-([^-]+)-([^\.]+)$/.match(json.app_file).captures 
-      ltr = cls
-      cls = opts.prefix+'App'+cls.capitalize
-    end
-    outfile = File.join(File.expand_path('.'),'spec',%{spec_#{filename_inner}-genned.rb})
-    fn = ''
-    
-    run_it_with_this = %{bacon spec/spec_#{filename_inner}-genned.rb}
-    putz <<-HERE.gsub(/^    /,'')
-    # #{run_it_with_this}
-    require File.expand_path('../bacon-helper', __FILE__)
-    HERE
-    if json.require
-      putz %{require '#{json.require}'}
-    else
-      putz %{require Hipe::Cli::DIR+'/examples/#{json.app_file}.rb'}
-    end
-    
-    putz <<-HERE.gsub(/^      /,'')
+    json = parse_json_header(infile.fh.gets)
+    info = get_name_things(infile)
 
-
-      # You may not want to edit this file.  It was generated from data in "#{File.basename(infile.filename)}"
-      # by #{cli.program_name} gentest.  If tests are failing here, it means that either 1) the gentest generated 
-      # code that makes tests that fail (it's not supposed to do this), 2) That there is something incorrect in
-      # your "screenshot" data, or 3) that your app or hipe-cli has changed since the screenshots were taken
-      # and the tests generated from them.
-      # So, if the tests are failing here (and assuming gentest isn't broken), fix your app, get the output you want,
-      # make a screenshot (i.e. copy-paste it into the appropriate file), and re-run gentest, run the generated test,
-      # an achieve your success that way.  It's really that simple.
-      
-      
-    HERE
     
+     putz <<-HERE.gsub(/^      /,'')
+  
+  
+       # You may not want to edit this file.  It was generated from data in "#{File.basename(infile.filename)}"
+       # by #{cli.program_name} gentest.  If tests are failing here, it means that either 1) the gentest generated 
+       # code that makes tests that fail (it's not supposed to do this), 2) That there is something incorrect in
+       # your "screenshot" data, or 3) that your app or hipe-cli has changed since the screenshots were taken
+       # and the tests generated from them.
+       # So, if the tests are failing here (and assuming gentest isn't broken), fix your app, get the output you want,
+       # make a screenshot (i.e. copy-paste it into the appropriate file), and re-run gentest, run the generated test,
+       # an achieve your success that way.  It's really that simple.
+       
+       
+     HERE
+
+     command_arrays = opts.speed_up ? shell_hack : old_way
+    if opts.speed_up   
+      sep = '561ccbcb1909a1579dde2c9a655301900e17cc03'
+      long = requests.join(' '+sep+' ')
+      rs = Hipe.shell!(long)
+      nu = []
+      cursor = 0
+      curr_array = []
+      (0..(rs.size - 1)).map.each do |idx|
+        if rs[idx] == sep
+          nu << curr_array
+          curr_array = []
+        else
+          curr_array << rs[idx]
+        end
+      end
+      nu << curr_array
+    end
+          
+
       
     putz %{describe "#{desc.capitalize.gsub('-',' ')} (generated tests)" do}
     puts %{\n\n(each call to shell! to parse the argv takes ~0.5 seconds!?)}
-    i = 0
-    parsed.each do |test_input, data|
+    (0..requests.size-1).each do |i|
+      data  = responses[i]
+      if (opts.speed_up)
+        argv = nu[i]
+      else
+        argv = Hipe.shell!(requests[i])
+      end
       output_lines = data.response
       comment = data.comment
-      i += 1      
-      argv = Hipe.shell!(test_input)
+
       putz "\n"
       putz %{  it "#{comment||'should work'} (#{ltr}-#{i})" do}
-      argv = Hipe.shell!(test_input); print('.')
+
       argv.shift # app name
-      putz %{    @app = #{cls}.new } if (1==i  or json.app_regen)
+      putz %{    @app = #{cls}.new } if (0==i  or json.app_regen)
       if json.direct
         cmd = argv.shift        
         putz %{    x = @app.cli.commands["#{cmd}"].run(#{argv.inspect})}
@@ -132,37 +159,119 @@ class HipeCliHelper
     %{\nGenerated spec file:\n#{outfile}\n}+
     %{Try running the generated test with:\n\n#{run_it_with_this}\n\n}
   end
-  def parse_file(infile,opts)
-    prompt = opts.prompt
-    comment_re = /^ *# ?(.+)/
-    parsed = OrderedHash.new  
-    request = response = last_comment = nil
-    re = Regexp.new('^'+Regexp.escape(prompt)+'(.+)')
-    infile.fh.each_line do |line|
-      puts line      
-      next if (''== line.chomp! )  
-      if (md = comment_re.match(line))
-        last_comment = md[1]
-      elsif (md = re.match(line))
-        unless (response.nil?)
-          parsed[request] = OpenStruct.new({:response => response, :comment => last_comment})
-          last_comment = nil
-        end
-        request = md[1]
-        response = []                
-      else
-        if (response.nil?)
-          raise %{First line of file must match regex. \nPromptString: }+
-            %{"#{prompt}"\nRegexp: #{re}\nFirst Line:<<<<<<#{line}>>>>>>}
-        end
-        response << line
-      end
+  
+  # bn (basename) filename_inner
+  def get_name_things(infile)
+    rs = OpenStruct.new
+    rs.bn = File.basename(infile.filename)
+    raise GGE.f(%{please rename #{bn} to match the pattern "*.screenshots"}) unless(md = bn.match(/^([^\.]+).screenshots$/))
+    rs.filename_inner = md.captures[0]
+    items = parse_file(infile,json)
+    @out = Hipe::Io::BufferString.new
+
+    outfile = File.join(File.expand_path('.'),'spec',%{spec_#{filename_inner}-genned.rb})
+    fn = ''
+
+      run_it_with_this = %{bacon spec/spec_#{filename_inner}-genned.rb}
+      putz <<-HERE.gsub(/^    /,'')
+      # #{run_it_with_this}
+      require File.expand_path('../bacon-helper', __FILE__)
+      HERE
+     if json.require
+#       putz %{require '#{json.require}'}
+     else
+       putz %{require Hipe::Cli::DIR+'/examples/#{json.file_with_app}.rb'}
+     end    
+  
+  def parse_json_header(first_line)
+    begin
+      json = OpenStruct.new( JSON.parse(first_line) )
+    rescue JSON::ParserError => e
+      raise Exception.f <<-HERE.gsub(/^  /,'')
+      Failed to parse first line of #{infile.filename} as json:
+      #{e.message}
+      With Line:
+      #{first_line.inspect}}
+      HERE
     end
-    parsed[request] = OpenStruct.new({:response => response, :comment => last_comment})
-    parsed
+    if (json.file_with_app)
+       raise Exception.unless(md=/^app-([^-]+)-([^\.]+)$/.match(json.file_with_app))
+      cls.desc = .captures 
+    
+    json.desc ||= 'generated test'    
+    if json.cls
+
+      json.ltr ||= 't'
+    else
+      json.cls, desc = 
+      ltr = cls
+      cls = opts.prefix+'App'+cls.capitalize
+    end    
+    
+    
+    json
   end
   
-  def gentest_list(opts,thing)
+  
+    
+    
+  def parse_file(infile,opts)
+    new_struct = lambda {
+      struct = Hipe::OpenStructWriteOnceExtension.new(:response_lines => [])
+      struct.write_once! :prompt
+      struct
+    }
+    items = []    
+    current = new_struct.call
+    advance = lambda {
+      items << current
+      current = new_struct.call
+    }
+    prompt = opts.prompt
+    comment_re = /^ *# ?(.+)/
+    prompt_re = Regexp.new('^'+Regexp.escape(prompt)+'(.+)')
+    blank_re = /^ *$/
+    current = new_struct.call
+    state = :start
+    infile.fh.each_line do |line|
+      case line
+      when blank_re then next   
+      when comment_re then 
+        case state
+        when :start,:comment then          
+        when :prompt then raise Exception.f(%{comments should not come between prompt and response})          
+        when :response then advance.call
+        else raise Exception(%{invalid state #{state.inspect}})
+        end
+        current.comment = line
+        state = :comment
+      when prompt_re
+        case state
+        when :comment then
+        when :response then advance
+        when :prompt then raise Exception.f(%{a prompt after a prompt?})
+        else raise Exception(%{invalid state #{state.inspect}})
+        end          
+        current.prompt = line
+        state = :prompt
+      else
+        case state
+        when :comment then raise Exception.f(%{comments should not come between prompt and response})
+        when :response,:prompt then 
+        else raise Exception(%{invalid state #{state.inspect}})          
+        end  
+        current.response_lines << line
+        state = :response
+      end
+    end
+    case state
+    when :response then advance
+    else raise Exception.f(%{bad end state for  file "#{state.inspect}"})
+    end
+    items
+  end
+  
+  def gentest_list(opts)
     out = cli.out.new
     default_location = 'spec/gentest-screenshots'
     list = Dir[File.join(default_location,'/*')]
@@ -191,3 +300,7 @@ class HipeCliHelper
 end
 
 puts HipeCliHelper.new.cli.run(ARGV) if File.basename($PROGRAM_NAME) == File.basename(__FILE__)
+
+# hipe: Basic question -- i'm working with a file, parsing it, (no it's not xml or html) and i'm trying to find a way to read each line, like you might with filehandle.gets or filehandle.each_line, but i'm trying to find a nice way to "peek" at the next line and either accept it or reject it, as if it were a stack.  So i was thinking of actually turning the whole file into an array of lines.  But is there a stream-not-tree ap
+#13:32 hipe: proach that i should be taking?
+#13:33 hipe: cause i might make a little 5 line class that has "peek" and "pop"
