@@ -152,12 +152,11 @@ class HipeCliCli
       out.puts %{#{i}) #{filename}}
     end
     puts out.read
-    puts "\n\nchoose a number or enter anything else to quit: "
+    print "\nchoose a number or enter anything else to quit: "
     thing = $stdin.gets.chop
-    if /^\d+/ =~ thing and list[thing.to_i]
-      o = OpenStruct.new(:filename => list[thing.to_i])
-      o.fh = File.open(o.filename,'r')
-      return gentest(o,opts)
+    if /^\d+$/ =~ thing and list[thing.to_i]
+      fh = File.open(list[thing.to_i], 'r')
+      return gentest(fh,opts)
     else
       puts "thank you."
     end
