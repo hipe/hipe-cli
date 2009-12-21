@@ -62,5 +62,8 @@ describe "hipe-cli cli GENTEST" do
     rs.valid?.should.equal true
     rs.to_s.should.match %r{Generated spec file}i
     notice_stream << rs
+    Hipe::Test::Helper[Hipe::Cli].clear_writable_tmp_dir!     # for now we don't test it,
+    # and we have to remove it so rcov doesn't try to generate coverage for it after it
+    # has been deleted by subsequent tests!
   end
 end
