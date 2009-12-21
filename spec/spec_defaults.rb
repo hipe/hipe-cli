@@ -1,5 +1,4 @@
 # bacon spec/spec_defaults.rb
-require File.expand_path('../bacon-helper', __FILE__)
 require Hipe::Cli::DIR+'/examples/app-d1-defaults.rb'
 
 describe AppD1,'defaults' do

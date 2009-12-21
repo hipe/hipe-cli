@@ -1,5 +1,4 @@
 # bacon spec/spec_optparsey.rb
-require File.expand_path('../bacon-helper', __FILE__)
 #require Hipe::Cli::DIR+'/examples/app-op1.rb'
 
 class AppOp1

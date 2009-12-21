@@ -1,5 +1,4 @@
 # bacon spec/spec_basics.rb
-require File.expand_path('../bacon-helper', __FILE__)
 
 describe Hipe::Cli do
   it "should have loaded with the correct version (b1)" do

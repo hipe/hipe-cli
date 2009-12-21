@@ -1,5 +1,4 @@
 # bacon spec/spec_predicates-genned.rb
-require File.expand_path('../bacon-helper', __FILE__)
 require Hipe::Cli::DIR+'/examples/app-it3-predicates.rb'
 
 

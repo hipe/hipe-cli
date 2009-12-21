@@ -1,5 +1,4 @@
 # bacon spec/spec_app-opts.rb
-require File.expand_path('../bacon-helper', __FILE__)
 
 class AppA1
   include Hipe::Cli

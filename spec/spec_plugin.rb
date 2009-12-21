@@ -1,5 +1,4 @@
 # bacon spec/spec_plugin.rb
-require File.expand_path('../bacon-helper', __FILE__)
 require Hipe::Cli::DIR+'/examples/app-p1-plugins.rb'
 
 describe AppP1, "plugins" do
