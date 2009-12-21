@@ -1,4 +1,6 @@
 # bacon spec/spec_basics.rb
+require 'hipe-cli'
+
 
 describe Hipe::Cli do
   it "should have loaded with the correct version (b1)" do

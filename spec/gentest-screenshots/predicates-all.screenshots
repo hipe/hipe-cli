@@ -1,4 +1,4 @@
-{"prompt":"~/c > ","app_file":"app-it4-all-builtin-predicates"}
+{"prompt":"~/c > ","requires":["examples/app-it4-all-builtin-predicates"],"class":"It4App"}
 
 # emtpy should be ok
 ~/c > it4 go 

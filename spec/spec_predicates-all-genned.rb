@@ -1,5 +1,7 @@
-# bacon spec/spec_predicates-all-genned.rb
+# bacon -n '(.*)' spec/spec_predicates-all-genned.rb
+require 'hipe-cli'
 require Hipe::Cli::DIR+'/examples/app-it4-all-builtin-predicates.rb'
+require 'ruby-debug'
 
 
 # You may not want to edit this file.  It was generated from data in "predicates-all.screenshots"
@@ -48,6 +50,7 @@ describe "All builtin predicates (generated tests)" do
   end
 
   it "float fail (it4-5)" do
+    @app = AppIt4.new
     x = @app.cli.commands["go"].run(["--must-be-integer", "123"])
     y =<<-__HERE__.gsub(/^      /,'').chomp
       your opts: {:must_be_integer=>123}

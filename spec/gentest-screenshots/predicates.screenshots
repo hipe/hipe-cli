@@ -1,4 +1,4 @@
-{"prompt":"~/c > ","app_file":"app-it3-predicates"}
+{"prompt":"~/c > ","requires":["examples/app-it3-predicates"]}
 
 # you get a default sandwich this way.  enjoy your olives
 ~/c > it3 order-sandwich julia

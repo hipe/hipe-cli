@@ -1,4 +1,6 @@
 # bacon spec/spec_predicates.rb
+require 'hipe-cli'
+require 'hipe-core/test/helper'
 require Hipe::Cli::DIR+'/examples/app-it3-predicates.rb'
 
 
@@ -63,11 +65,11 @@ class AppPred1
     }
   }
   def laundry(infile,outfile)
-    s = %{input filename: #{infile.filename}, output filename: #{outfile.filename}\n}
-    bytes = outfile.fh.write(infile.fh.read)
+    s = %{input filename: #{infile.path}, output filename: #{outfile.path}\n}
+    bytes = outfile.write(infile.read)
     s << %{wrote #{bytes} bytes to outfile.}
-    infile.fh.close
-    outfile.fh.close
+    infile.close
+    outfile.close
     s
   end
 end

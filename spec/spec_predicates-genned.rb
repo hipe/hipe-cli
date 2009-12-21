@@ -1,4 +1,6 @@
 # bacon spec/spec_predicates-genned.rb
+require 'hipe-cli'
+require 'ruby-debug'
 require Hipe::Cli::DIR+'/examples/app-it3-predicates.rb'
 
 

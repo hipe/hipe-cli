@@ -19,7 +19,7 @@ module GemHelpers
       yet another take on cli
       EOS
 
-      s.add_dependency "hipe-core", ">= 0.0.2"
+      s.add_dependency "hipe-core", ">= 0.0.3"
 
       require "git"
       repo = Git.open(".")

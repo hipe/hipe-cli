@@ -1,7 +1,7 @@
-== 0.0.10 (the next bleeding edge version) or above will be:
-  * splat
-  * generated descriptions for command elements from dsl
 == 0.0.9 (this bleeding edge version) 
+  * in Hipe::Cli::Cli#run() wrap String response in a thing that responds to valid? if necessary.
+  * added make_it_not_an_It so that method_missing doesn't look for predicates in the implementing method
+  * gets_opened() predicate now returns a plain old filehandle, not an OpenStruct
   * Exceptions now support the idea of a "graceful list" -- land gracefully for these exceptions
   * ridiculous ridiculous goto logic
   * app-level options (replacing OptionLikeCommands)
@@ -9,7 +9,7 @@
   * generate banner for individual commands
   * plugins can now be requested by name with no subcommand (for default commands, etc)
   * bugfix for showing -h too many times with plugins
-== 0.0.8 (this bleeding edge version) or above will be:
+== 0.0.8 / 2009-12-19
   * predicates with 98.44% coverage
   * removed output buffering class registration
 == 0.0.7 / 2009-12-15 
@@ -37,3 +37,6 @@
 == 0.0.0 / 2009-11-19
 * 1 major enhancement
   * existence (apologies to webrat)
+== THE DISTANT FUTURE, THE YEAR 2000
+  * splat
+  * generated descriptions for command elements from dsl

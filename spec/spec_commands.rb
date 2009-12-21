@@ -1,4 +1,5 @@
 # bacon spec/spec_commands.rb
+require 'hipe-cli'
 
 class AppC1
    include Hipe::Cli
@@ -36,7 +37,7 @@ begin
     def bar; end
     cli.does 'bar', 'again'
   end
-rescue Hipe::Cli::Exception => e
+rescue Hipe::Cli::GrammarGrammarException => e
   exception = e
 end
 

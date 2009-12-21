@@ -1,4 +1,6 @@
 # bacon spec/spec_app-opts.rb
+require 'hipe-cli'
+# require 'hipe-core/test/helper'
 
 class AppA1
   include Hipe::Cli

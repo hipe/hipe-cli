@@ -1,4 +1,5 @@
 # bacon spec/spec_help.rb
+require 'hipe-cli'
 require Hipe::Cli::DIR+'/examples/app-h7.rb'
 
 describe AppH7, 'after the call to parse_definition' do

@@ -1,9 +1,10 @@
 # bacon spec/spec_plugin.rb
+require 'hipe-cli'
 require Hipe::Cli::DIR+'/examples/app-p1-plugins.rb'
 
 describe AppP1, "plugins" do
 
-  skipit "object graph (p1)" do
+  it "object graph (p1)" do
     @app4 = AppP4.new
     cli4 = @app4.cli
     lambda{ cli4.app_instance! }.should.not.raise
@@ -20,10 +21,10 @@ describe AppP1, "plugins" do
     cli1.command_prefix.should.equal "app3:app2:app1:"
 
     cli1.app_instance!.cli.parent_cli.app_instance!.
-      cli.parent_cli.app_instance!.cli.parent_cli.app_instance!.equal?(@app4).should.equal true
+    cli.parent_cli.app_instance!.cli.parent_cli.app_instance!.equal?(@app4).should.equal true
   end
 
-  skipit "command should report a nice long name (p2)" do
+  it "command should report a nice long name (p2)" do
     cmd = @app4.cli.commands['app3:app2:app1:archipelago']
     name = cmd.full_name
     name.should.equal "app3:app2:app1:archipelago"
@@ -34,7 +35,7 @@ describe AppP1, "plugins" do
     name.should.equal "app3:app2:app1:archipelago"
   end
 
-  skipit "should have a good looking reflection (p3)" do
+  it "should have a good looking reflection (p3)" do
     @app3 = AppP3.new
     (@app3.cli.plugins.equal? @app3.cli.plugin).should.equal true
     @app3.cli.plugin[:app3].should.equal nil
@@ -44,7 +45,7 @@ describe AppP1, "plugins" do
     (app2_2.equal? app2).should.equal true
   end
 
-  skipit "should archipelagate (p4)" do
+  it "should archipelagate (p4)" do
     str = @app4.cli.run(['app3:app2:app1:archipelago', '--o1', 'O1VAL', 'REQ1VAL'])
     str.should.equal 'archi: "REQ1VAL", "O1VAL"'
   end
@@ -75,16 +76,16 @@ class AppP7
 end
 
 describe AppP6,' and AppP7' do
-  skipit "if you have a handle on your plugin class you can use the left shift operator (p5)" do
+  it "if you have a handle on your plugin class you can use the left shift operator (p5)" do
     e.should.equal nil
     @app = AppP6.new
     @app.cli.plugins['app-p5'].cli.app_instance!.should.be.kind_of DontBecomePartOfName::AppP5
   end
-  skipit "should fail when you ask for an invalid plugin (p6)" do
+  it "should fail when you ask for an invalid plugin (p6)" do
     e = lambda { @app.cli.commands["not:there"] }.should.raise(Exception)
     e.message.should.match %r{unrecognized plugin "not". Known plugins are "app-p5"}i
   end
-  skipit "should load plugins from dir (p7)" do
+  it "should load plugins from dir (p7)" do
     app = AppP7.new
     app.cli.plugins.size.should.equal 2
     app.cli.plugin['plugin-a'].should.be.kind_of(Hipe::Cli)

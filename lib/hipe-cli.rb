@@ -1,12 +1,12 @@
+require 'rubygems'
 require 'orderedhash'
 require 'ostruct'
-require 'rubygems'
-require 'ruby-debug'
-gem     'hipe-core', '0.0.2'
+require 'hipe-core'
 require 'hipe-core/lingual/ascii-typesetting'
 require 'hipe-core/lingual/en'
 require 'hipe-core/struct/open-struct-like'
 require 'hipe-core/io/golden-hammer'
+
 
 module Hipe
   module Cli
@@ -72,7 +72,8 @@ module Hipe
                 if orig_block
                   It.make_it_an_It(it, self, switch)
                   result_from_original = orig_block.call(it)
-                  opt_values[switch.main_name] = result_from_original
+                  un_it = It.make_it_not_an_It(result_from_original)
+                  opt_values[switch.main_name] = un_it
                 else
                   opt_values[switch.main_name] = it
                 end
@@ -145,8 +146,7 @@ module Hipe
         instance_eval(&definition)
       end
       def parse_universal_values(argv)
-        univ_values = parse_universals
-        Hipe::OpenStructLike.enhance(univ_values)
+        univ_values = Hipe::OpenStructLike[parse_universals]
         # oh boy..find the first instance of a token in argv that looks like a switch for which we
         # have no corresponding short or long switch.
         univ = @switches_by_name.values.map{|x| x.short + x.long }.flatten
@@ -220,12 +220,12 @@ module Hipe
         lines = []
         lines <<  (%{#{program_name} - #{description}\n}) if description
         left = %{usage: #{program_name}}
-        right = Hipe::AsciiTypesetting::FormattableString.new( [
+        right = Hipe::AsciiTypesetting::FormattableString[ [
           ' ' + universals.values.map{|x|%{#{x.syntax}} } * ' ',
           ' ' + @commands.select{|i,cmd| OptionyLookingCommand === cmd}.map{|c|
             '[' + ([c[1].short_name,c[1].long_name].compact * '|') + ']'
           }.uniq * ' ',
-          ' COMMAND [OPTIONS] [ARG1 [ARG2 [...]]]'].select{|x| x.strip.length > 0}.join )
+          ' COMMAND [OPTIONS] [ARG1 [ARG2 [...]]]'].select{|x| x.strip.length > 0}.join ]
         right_column_width = [20, screen.width-left.length].max
         lines << left + right.word_wrap_once!(right_column_width)
         lines << right.word_wrap!(right_column_width).indent!(left.length) if right.size > 0
@@ -343,15 +343,16 @@ module Hipe
           end
         end
       end
-      def main_name
-        str = nil
-        if (@long && @long.size > 0)
-          str = /^-?-?(.+)/.match(@long[0]).captures[0]
-        elsif (@short && @short.size > 0)
-          str = /^-?(.+)/.match(@short[0]).captures[0]
-        end
-        str.gsub('-','_').downcase.to_sym
-      end
+      def main_name; switch_name.gsub('-','_').downcase.to_sym; end
+        #swt
+        # str = nil                      @ todo
+        # if (@long && @long.size > 0)
+        #   str = /^-?-?(.+)/.match(@long[0]).captures[0]
+        # elsif (@short && @short.size > 0)
+        #   str = /^-?(.+)/.match(@short[0]).captures[0]
+        # end
+        # str.gsub('-','_').downcase.to_sym
+      #end
       def surface_name
         /^-?-?(.+)/.match(@long[0]).captures[0]
       end
@@ -442,18 +443,15 @@ module Hipe
       def self.module_with_method(method_name)
         predicate_module_names = @predicate_modules.map{|x| x.to_s}
         raise Exception.f(%{Can't find predicate "#{method_name}()" anywhere within }+
-          Hipe::Lingual.en{np('registered','predicate','module',predicate_module_names,:say_count=>false)}.say) unless
+          Hipe::Lingual.en{np('registered predicate module',predicate_module_names,:say_count=>false)}.say) unless
             it = @predicate_modules.detect{|x| x.instance_methods.include? method_name.to_s}
          it
       end
-      def self.changed_type(it,previous_it)
-        if (Fixnum === it)
-          return it  # this will be annoying until we explain it
-        else
-          it.extend It
-          it.init_it_with_it(previous_it)
-          it
-        end
+      def self.changed_type(it,previous_it) # @TODO refactor
+        return it unless has_virtual_class? it
+        it.extend It
+        it.init_it_with_it(previous_it)
+        it
       end
       attr_accessor :command, :command_element
       def method_missing name, *args
@@ -463,6 +461,22 @@ module Hipe
       def self.make_it_an_It(it,command,command_element)
         it.extend self
         it.reinit_it!(command,command_element)
+      end
+      def self.has_virtual_class?(it)  # see zenspider/manvery/shevy's comments at 2009-12-20 20:50  @TODO refactor
+        begin
+          class << it; end
+        rescue TypeError => e
+          raise e unless e.message.match(%r{no virtual class})
+          return false
+        end
+        return true
+      end
+      def self.make_it_not_an_It(it)
+        return it unless has_virtual_class?(it)
+        class << it
+          undef_method :method_missing
+        end
+        it
       end
       def reinit_it!(command, command_element)
         raise %{must be Commmand! had "#{command.class}"} unless Hipe::Cli::Command === command #@todo remove?
@@ -511,7 +525,7 @@ module Hipe
       def as_method_name; main_name.to_s.gsub('-','_').downcase.to_sym end
       def desc_arr  # if we wanna be like optparse, return an array.
         return [] unless @description
-        Hipe::AsciiTypesetting::FormattableString.new(@description).word_wrap!(39).split("\n") # @todo
+        Hipe::AsciiTypesetting::FormattableString[@description].word_wrap!(39).split("\n") # @todo
       end
     end
     class Interrupt < OpenStruct
@@ -769,7 +783,7 @@ module Hipe
       end
       protected
       def load_all!
-        return unless @dirs        
+        return unless @dirs
         @cli.app_instance.before_plugins_load if @cli.app_instance.respond_to?(:before_plugins_load)
         @dirs.each do |arr|
           add_directory!(arr[0],arr[1])
@@ -893,7 +907,7 @@ module Hipe
       end
     end
     Exception.graceful_list << OptionParser::ParseError
-    class GrammarGrammarException < Exception; end
+    class GrammarGrammarException < Hipe::Exception; end
     module BuiltinPredicates
       It.register_predicates(self)
       def must_match_regexp(re, message_template=nil)
@@ -981,8 +995,7 @@ module Hipe
             e.message, :type=>:couldnt_open_file)  # @TODO does this reveal system info crap?
           return self
         end
-        open_struct_data = {:fh => fh, :filename => self}
-        It.changed_type(OpenStruct.new(open_struct_data), self)
+        It.changed_type(fh, self)
       end
     end
   end
