@@ -28,7 +28,7 @@ class AppH7
     optional('OPT2','second optional')
   end
   def blearg(req1,req2,opt1,opt2,opts)
-    %{#{req1}/#{req2}/#{opt1}/#{opt2}/#{opts.inspect}"}
+    %{#{req1}/#{req2}/#{opt1}/#{opt2}/#{opts.to_hash.inspect}"}
   end
   cli.does(:no_touch, "this is for testing element reflection" ) do
     option('-c','--cleanliness HOW_CLEAN', 'how clean do you like it?')

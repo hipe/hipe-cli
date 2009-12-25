@@ -1,0 +1,22 @@
+# This is a gentest screenshot file. Please see hipe-cli gentest.
+{ 
+  "prompt" : "~/c > ",
+  "requires" : "hipe-cli",
+  "module" : "Hipe::Cli",  
+  "relative_requires":["examples/app-it3-predicates"],
+  "klass"  : "AppIt3"
+}
+
+# add with missing parameters
+~/c > sosy users:add
+There are two missing required arguments: email and admin_email
+See "sosy users:add -h" for more info.
+
+~/c > sosy users:add -h
+users:add - add a user to the list
+
+Usage: sosy users:add [-h] email admin_email
+    -h
+        email                        any ol' name you want, not an existing name
+        admin_email                  the person acting as the admin
+

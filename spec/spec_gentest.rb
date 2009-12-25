@@ -55,15 +55,53 @@ describe "hipe-cli cli GENTEST" do
   it "should parse the test cases and write a file! (gt5)" do
     Hipe::Test::Helper[Hipe::Cli].clear_writable_tmp_dir!
     @a = HipeCliCli.new
+    @a.notice = Hipe::Io::BufferString.new
     in_path = Klz.singleton.filepath 'gentest-multi-line-json.screenshots'
     out_path = File.join(Dir.pwd,'spec','writable-tmp','spec_my-genned-spec.rb')
     rs = @a.cli.run(['gentest','--out-file',out_path, in_path])
-    notice_stream.puts rs.to_s unless rs.valid?
+    #notice_stream.puts rs.to_s unless rs.valid?
     rs.valid?.should.equal true
     rs.to_s.should.match %r{Generated spec file}i
-    notice_stream << rs
+    #notice_stream << rs
     Hipe::Test::Helper[Hipe::Cli].clear_writable_tmp_dir!     # for now we don't test it,
     # and we have to remove it so rcov doesn't try to generate coverage for it after it
     # has been deleted by subsequent tests!
+  end
+
+  it "should write test file when input has blanks (gt6)" do
+    Hipe::Test::Helper[Hipe::Cli].clear_writable_tmp_dir!
+    @a = HipeCliCli.new
+    @a.notice = Hipe::Io::BufferString.new
+    in_path = Klz.singleton.filepath 'gentest-multi-line-w-blanks.screenshots'
+    out_path = File.join(Dir.pwd,'spec','writable-tmp','spec_my-genned-multiline-spec.rb')
+    rs = @a.cli.run(['gentest','--out-file',out_path, in_path])
+    #notice_stream.puts rs.to_s unless rs.valid?
+    rs.valid?.should.equal true
+    rs.to_s.should.match %r{Generated spec file}i
+    #notice_stream << rs
+    Hipe::Test::Helper[Hipe::Cli].clear_writable_tmp_dir!
+  end
+
+  # this test works but it won't respect other command line opts so we can't control the output folder
+  #it "should write test with -l NUM option (gt7)" do
+  #  @a = HipeCliCli.new
+  #  out_path = File.join(Dir.pwd,'spec','writable-tmp','eraseme.rb')
+  #  rs = @a.cli.run(['gentest','--out-file',out_path,'-l0'])
+  #  rs.to_s.should_match %r{Generated spec file:\nspec/spec_a1-genned}
+  #  debugger
+  #  'x'
+  #end
+
+  it "should work when there is no comment header (gt8)" do
+    @a = HipeCliCli.new
+    @a.notice = Hipe::Io::BufferString.new
+    in_path = Klz.singleton.filepath 'gentest-no-comment.screenshots'
+    out_path = File.join(Dir.pwd,'spec','writable-tmp','spec_no-comment.rb')
+    rs = @a.cli.run(['gentest','--out-file',out_path, in_path])
+    #notice_stream.puts rs.to_s unless rs.valid?
+    rs.valid?.should.equal true
+    rs.to_s.should.match %r{Generated spec file}i
+    #notice_stream << rs
+    Hipe::Test::Helper[Hipe::Cli].clear_writable_tmp_dir!
   end
 end

@@ -1,23 +1,17 @@
 # bacon spec/spec_help.rb
+require 'ruby-debug'
 require 'hipe-cli'
 require Hipe::Cli::DIR+'/examples/app-h7.rb'
 
+
 describe AppH7, 'after the call to parse_definition' do
-#  it "please for gods sake just finally gen a syntax (h19)" do
-#    @app = AppH7.new
-#    @c = @app.cli.commands['gen_me']
-#    debugger
-#    @c.run(['-h'])
-#    debugger
-#    'x'
-#  end
 
   it "should have switches_by_name and switches_by_type ok (h13)" do
     @app = AppH7.new
     c = @app.cli.commands['gen_me']
-    c.parse_definition
+    c.my_get_option_values!
     c.switches_by_name.size.should.equal 2
-    c.switches_by_type.size.should.equal 6
+    c.switches_by_type.size.should.equal 1
     c.switches_by_type[Hipe::Cli::Switch].size.should.equal 2
   end
 
@@ -121,11 +115,14 @@ describe AppH7, 'larger' do
   end
 end
 
-class AppH11; include Hipe::Cli; cli.does('-h','--help'); end
+class AppH11; include Hipe::Cli;
+  cli.does('-h','--help');
+end
 
 describe AppH11 do
   it "should secrety do the recursive help easter egg that no one will ever find (h12)" do
-    x = AppH11.new.cli.commands[:help].run(['-h','--help','-?'] * 10 )
+    cli = AppH11.new.cli
+    x = cli.commands[:help].run(['-h','--help','-?'] * 10 )
     x.should.match(Regexp.new(Regexp.escape('[...[...[..[.]]]]')))
   end
 end

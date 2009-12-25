@@ -6,11 +6,13 @@ require 'hipe-core/io/stack-like'
 require 'hipe-core/struct/open-struct-common-extension'
 require 'hipe-core/struct/open-struct-write-once-extension'
 require 'hipe-core/lingual/en'
+require 'hipe-core/test/helper'
 
 class HipeCliCli
   class GentestException < Hipe::Exception; end
-  Hipe::Cli::Exception.graceful_list << GentestException
+  attr_accessor :notice
   include Hipe::Cli
+  cli.graceful{|e| e if GentestException === e}
   cli.does('-h','--help', 'help<<self')
   cli.out.class = Hipe::Io::GoldenHammer
   cli.default_command = :help
@@ -41,8 +43,8 @@ class HipeCliCli
 
   cli.does(:gentest, "generate tests from copy-pasted terminal output") do
     option('-h','--help','help<<self', &help)
-    option('-l','--list',"choose from a list of files in the default folder.") do
-      goto{ app_instance.list_gentest_screenshots(opt_values) }
+    option('-l','--list [NUM]',"choose from a list of files in the default folder.") do |number|
+      goto{ app_instance.list_gentest_screenshots(number) }
     end
     option('-o','--out-file FILE', 'write to this file instead of the default location.') do |it|
       it.must_not_exist!
@@ -50,7 +52,7 @@ class HipeCliCli
     # option('-s','--[no-]sped-up', 'whether or not to use the shell hack to speed up rendering (default true)')
     # hidden options in the yaml file
     # chomp       whether or not to chomp the newline character after app output (default true)
-    # direct      whether to call commands directly or thru the app   (default false)
+    # run_with    "command" | "cli" | "app"
     # app_regen   whether or not to create a new instance of the app each time (default false)
     # describe    describe YourApp, "<your text" do
     required('INPUT_FILE', 'the file of copy-pasted terminal stuff'){ |it|
@@ -143,20 +145,24 @@ class HipeCliCli
     json
   end
 
-  def list_gentest_screenshots(opts)
+  def list_gentest_screenshots(number)
     out = cli.out.new
     default_location = 'spec/gentest-screenshots'
-    list = Dir[File.join(default_location,'/*')]
-    out.puts "Pick a screenshot file to regen:\n\n"
-    list.each_with_index do |filename, i|
-      out.puts %{#{i}) #{filename}}
+    list = Dir[File.join(default_location,'/*')].sort
+    if (number && /^\d+$/ =~ number)
+      thing = number
+    else
+      out.puts "Pick a screenshot file to regen:\n\n"
+      list.each_with_index do |filename, i|
+        out.puts %{#{i}) #{filename}}
+      end
+      puts out.read
+      print "\nchoose a number or enter anything else to quit: "
+      thing = $stdin.gets.chop
     end
-    puts out.read
-    print "\nchoose a number or enter anything else to quit: "
-    thing = $stdin.gets.chop
     if /^\d+$/ =~ thing and list[thing.to_i]
       fh = File.open(list[thing.to_i], 'r')
-      return gentest(fh,opts)
+      return gentest(fh,Hipe::Cli::OptionValues.new) # ahem
     else
       puts "thank you."
     end
@@ -165,7 +171,7 @@ class HipeCliCli
 
   # we really avoided using racc @todo
   def parse_test_cases(infile, prompt)
-    @notice = $stdout
+    @notice ||= $stdout
     new_struct = lambda {
       struct = Hipe::OpenStructWriteOnceExtension.new(:response_lines => [])
       struct.write_once! :prompt, :result_lines
@@ -178,7 +184,7 @@ class HipeCliCli
     advance = lambda {
       test_cases << current_case
       current_case = new_struct.call
-      @notice.print "     < < < "+Hipe::Lingual.en{sp(np('test case',pp('now'),test_cases.size))}.say+" > > > \n\n"
+      @notice << "     < < < "+Hipe::Lingual.en{sp(np('test case',pp('now'),test_cases.size))}.say+" > > > \n\n"
     }
     change_state = lambda { |new_state, line|
       case new_state
@@ -196,8 +202,12 @@ class HipeCliCli
     infile.each_line do |line|
       line.chomp!
       case line
-      when blank_re then next
-      when comment_re then
+      when blank_re
+        case state
+        when :response then change_state.call(:response, line)
+        else # skip blanks
+        end
+      when comment_re
         case state
         when :start,:comment then
         when :prompt then raise ge(%{comments should not come between prompt and response})
@@ -207,8 +217,8 @@ class HipeCliCli
         change_state.call(:comment, line)
       when prompt_re
         case state
-        when :comment then
-        when :response then advance
+        when :start,:comment then
+        when :response then advance.call
         when :prompt then raise ge(%{a prompt after a prompt?})
         else raise gge(%{invalid state #{state.inspect}})
         end
@@ -250,7 +260,8 @@ class HipeCliCli
 
 
       # You may not want to edit this file.  It was generated from data in "#{File.basename(infile.path)}"
-      # by #{cli.program_name} gentest.  If tests are failing here, it means that either 1) the gentest generated
+      # by #{cli.program_name} gentest on #{DateTime.now.strftime('%Y-%m-%d %H:%M')}.
+      # If tests are failing here, it means that either 1) the gentest generated
       # code that makes tests that fail (it's not supposed to do this), 2) That there is something incorrect in
       # your "screenshot" data, or 3) that your app or hipe-cli has changed since the screenshots were taken
       # and the tests generated from them.
@@ -263,24 +274,36 @@ class HipeCliCli
 
     putz %{describe "#{describee.capitalize.gsub('-',' ')} (generated tests)" do}
 
+    opts.run_with ||= "command"
     (test_cases).each_with_index do |test_case, idx|
       putz %{\n  it "#{test_case.comment||'should work'} (#{letter}-#{idx})" do}
       x = nil
       ge(%{Parse failure of prompt: Expecting #{cli.program_name} had #{x}}) unless
         (cli.program_name==(x=test_case.parsed_prompt.shift))
       putz %{    @app = #{app_class_name}.new } if (0==idx  or opts.app_regen)
-      if opts.direct
+      case opts.run_with
+      when "command"
         cmd = test_case.parsed_prompt.shift
         putz %{    x = @app.cli.commands["#{cmd}"].run(#{test_case.parsed_prompt.inspect})}
-      else
+      when "cli"
         putz %{    x = @app.cli.run(#{test_case.parsed_prompt.inspect})}
+      when "app"
+        putz %{    x = @app.run(#{test_case.parsed_prompt.inspect})}
+      else
+        raise ArgumentError.new(%{Bad value for run_with -- "#{opts.run_with}"})
       end
-      putz <<-HERE1.gsub(/^  /,'')
-      y =<<-__HERE__.gsub(/^      /,'').chomp
-        #{test_case.response_lines.join("\n        ")}
-      __HERE__
-      HERE1
-      putz( (opts.chomp == false) ? %{    x.to_s.should.equal y} : %{    x.to_s.chomp.should.equal y} )
+      if (test_case.response_lines.size <= 1)
+        putz %{    y = #{test_case.response_lines.join.dump}}
+        putz %{    x.to_s.chomp.should.equal y}
+      else
+        test_case.response_lines.pop while test_case.response_lines.last =~ /^ *$/
+        putz <<-HERE1.gsub(/^      /,'')
+          y =<<-__HERE__.gsub(/^    /,'').chomp
+          #{test_case.response_lines.join("\n          ")}
+          __HERE__
+        HERE1
+        putz( (opts.chomp == false) ? %{    x.to_s.should.equal y} : %{    x.to_s.chomp.should.equal y} )
+      end
       putz %{  end}
     end
     putz %{end}

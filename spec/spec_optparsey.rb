@@ -1,5 +1,6 @@
 # bacon spec/spec_optparsey.rb
-#require Hipe::Cli::DIR+'/examples/app-op1.rb'
+require 'hipe-cli'
+require Hipe::Cli::DIR+'/examples/app-op1-original-optparse.rb'
 
 class AppOp1
   include Hipe::Cli

@@ -104,7 +104,8 @@ describe AppP8LazyLoading do
     @app.cli.plugin['plugin-a'].should.be.kind_of(Hipe::Cli)
   end
   it "should fail on (p9)" do
-    e = lambda { @app.cli.commands["not:there"] }.should.raise(Hipe::Cli::GrammarGrammarException)
+    @app = AppP8LazyLoading.new
+    e = lambda { @app.cli.commands["not:there"] }.should.raise(Hipe::Cli::ValidationFailure)
     e.message.should.match %r{unrecognized plugin "not". Known plugins are "plugin-a"}i
   end
   it "should load plugins from dir (p10)" do

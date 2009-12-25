@@ -1,0 +1,23 @@
+# This is a gentest screenshot file. Please see hipe-cli gentest.
+{ 
+  "prompt" : "~/c > ",
+  "requires" : "hipe-cli",
+  "module" : "Hipe::Cli",  
+  "relative_requires":["examples/app-it3-predicates"],
+  "klass"  : "AppIt3"
+}
+
+# see if you can parse a multiline 
+~/c > it3
+usage: app-it3-predicates [-h|--help] COMMAND [OPTIONS] [ARG1 [ARG2 [...]]]
+
+Available subcommands are:
+        help
+        order-sandwich
+        laundry                      the output of this might not make
+                                     sense. it's just for tests
+
+
+# this is just here
+~/c > it3 laundry
+There are two missing required arguments: in_file and out_file

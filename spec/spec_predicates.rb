@@ -2,6 +2,7 @@
 require 'hipe-cli'
 require 'hipe-core/test/helper'
 require Hipe::Cli::DIR+'/examples/app-it3-predicates.rb'
+require 'ruby-debug'
 
 
 # this is here ase a test simply so we remember how we came up w/ the predicates extension,
@@ -37,12 +38,12 @@ module C
 end
 
 describe "Predicates" do
-  it  "should work (it1)" do
+  it  "should work (pred--2)" do
     b = B.new
     b.extend A
     b.foo_c('uno','dos','tres').should.equal %{foo c three: "tres"}
   end
-  it  "should fail (it2)" do
+  it  "should fail (pred--1)" do
     b = B.new
     b.extend A
     e = lambda {

@@ -1,7 +1,7 @@
 # bacon spec/spec_app-opts.rb
 require 'hipe-cli'
 require 'bacon'
-# require 'hipe-core/test/helper'
+require 'ruby-debug'
 
 class AppA1
   include Hipe::Cli
@@ -12,7 +12,13 @@ class AppA1
     option('-b','minus b')
   }
   def go(opts)
-    opts.inspect
+    opts.to_hash.inspect
+  end
+  cli.does('go2'){|x|
+    option('-b','minus b')
+  }
+  def go2(opts)
+    opts
   end
 end
 
@@ -29,8 +35,5 @@ describe "Application-level options" do
     app.cli.run(['-d','--env','go']).should.equal '{:debug=>true, :env=>true}'
   end
 
-
-  #it "should allow for help and version this way -- the default command et." do
-  #end
 end
 

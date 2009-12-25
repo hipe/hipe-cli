@@ -1,0 +1,20 @@
+# This is a gentest screenshot file. Please see hipe-cli gentest.
+{ 
+  "prompt" : "~/c > ",
+  "requires" : "hipe-cli",
+  "relative_requires":["examples/app-h13-bug"],
+  "klass"  : "AppH13",
+  "module" : "Hipe::Cli"
+}
+
+~/c > h13 something -h
+something - description of something
+
+Usage: app-h13-bug something [-h]
+    -h
+~/c > h13 something -h
+something - description of something
+
+Usage: app-h13-bug something [-h]
+    -h
+~/c >

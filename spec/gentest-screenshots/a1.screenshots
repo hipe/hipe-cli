@@ -1,0 +1,13 @@
+# This is a gentest screenshot file. Please see hipe-cli gentest.
+
+{ 
+  "prompt" : "~/c > ",
+  "requires" : "hipe-cli",
+  "module" : "Hipe::Cli",  
+  "relative_requires":["examples/app-it3-predicates"],
+  "klass"  : "AppIt3"
+}
+
+# forgot name
+~/c > it3 order-sandwich -t mayonaise
+there is one missing required argument: name

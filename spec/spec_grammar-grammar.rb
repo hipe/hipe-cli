@@ -1,6 +1,5 @@
 # bacon spec/spec_grammar-grammar.rb
 require 'hipe-cli'
-#require Hipe::Cli::DIR+'/examples/app-op1.rb'
 
 class AppGg1
   include Hipe::Cli

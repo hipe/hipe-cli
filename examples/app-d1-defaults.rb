@@ -43,7 +43,7 @@ class AppD1
   end
 
   def rhythmic_gymnastics(apparatus,opts)
-    %{apparatus is "#{apparatus}" and opts are: #{opts.inspect}}
+    %{apparatus is "#{apparatus}" and opts are: #{opts.table.inspect}}
   end
 end
 

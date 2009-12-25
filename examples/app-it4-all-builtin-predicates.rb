@@ -30,7 +30,7 @@ class AppIt4
   }
   def go(opts)
     out = cli.out.new
-    out << %{your opts: #{opts.inspect}}
+    out << %{your opts: #{opts.to_hash.inspect}}
     out
   end
 end

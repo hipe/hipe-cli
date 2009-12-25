@@ -2,11 +2,11 @@ require 'rubygems'
 require 'orderedhash'
 require 'ostruct'
 require 'hipe-core'
-require 'hipe-core/lingual/ascii-typesetting'
 require 'hipe-core/lingual/en'
-require 'hipe-core/struct/open-struct-like'
+require 'hipe-core/lingual/ascii-typesetting'
+require 'hipe-core/struct/hash-like-write-once-extension'
+require 'hipe-core/struct/open-struct-extended'
 require 'hipe-core/io/golden-hammer'
-
 
 module Hipe
   module Cli
@@ -23,85 +23,90 @@ module Hipe
       AppClasses[klass.to_s] = klass
     end
     module AppClassMethods
-      def cli; @cli end
+      attr_reader :cli
     end
-    def self.make_definition(type_module, name, list, block)
-      # find any hashes that do not follow arrays and assert there is no more then one... then make it an opts hash
-      opt_hashes, i = [], nil
-      list.each_with_index do |val, i|
-        opt_hashes << val if (Hash===val and i==0 || !(Array===list[i-1]))
-      end
-      if (opt_hashes.size > 0)
-        raise Exception.f(%{Cannot have more than one options hash for "#{name}"}) if opt_hashes.size > 1
-        opt_hash = list.slice!(i,1)[0]
-      end
-      OpenStruct.new({:hipe_type=>type_module, :first_arg => name, :list => list, :block => block, :opt_hash=>opt_hash})
-    end
-    # because of the crazy nature of the code blocks this needs to be run for each call to run()
-    # @return [OptionValues] the hash that is in scope when you made the definition
-    # @post_condition: @definitions, @switches_by_name, @switches_by_type get set.  Not ordered for now.
-    def self.definition_proc(definitions = nil,opt_values=nil)
-      Proc.new do
-        @prev = nil                       # for the "fsa" that makes sure things appear in the right order
-        if definitions.nil?
-          @definitions = []                # added to in instance eval below
+    module CanDefine
+      def add_definition(type_module, name, list, block)
+        # find any hashes that do not follow arrays and assert there is no more then one... then make it an opts hash
+        opt_hashes, i = [], nil
+        list.each_with_index do |val, i|
+          opt_hashes << val if (Hash===val and i==0 || !(Array===list[i-1]))
         end
-        opt_values ||= OptionValues.new   # is in scope below for switches to write their results to
-        @switches_by_name = { }           # hold on to each switch that OptParser builds
-        @switches_by_type = { Switch=>[], Positional=>[], Required=>[], Optional=>[], Universal=>[], Splat=>[] }
-        # if you have no definitions and block then you are done.
-        if (@block || definitions)
-          pass_this_to_op = lambda do |opts| # build all the switches for options, required, optionals, splat in one go
-            @option_parser = opts           # is made available thru opts() so definitions can e.g. opts.separator()
-            self.instance_eval(&@block) unless definitions # runs all the option(), required(), optional(), splat() definitions
-            (definitions || @definitions).each do |my_info|  # with each one of those definition we 'recorded' ...
-              first_arg = my_info.first_arg.to_s
-              unless /^-/ =~ first_arg
-                first_arg = %{--#{first_arg} VALUE} # positional arguments will need proper names and parameters
-              end                           # only for their construction (hack alert!)
-              switch = opts.define(first_arg,*my_info.list,&my_info.block) # make an optional, required, option, etc.
-              my_info.command = self
-              switch = my_info.hipe_type.enhance_switch(switch, my_info)  # for now it returns the same object but maybe not later
-              @switches_by_type[switch.hipe_type] << switch
-              if (Positional===switch)
-                @switches_by_type[Positional] << switch  # like an abstract base class. never the actual hipe_type
+        if (opt_hashes.size > 0)
+          raise GrammarGrammarException[%{Cannot have more than one options hash for "#{name}"}] if opt_hashes.size > 1
+          opt_hash = list.slice!(i,1)[0]
+        end
+        @definitions <<  OpenStruct.new(:hipe_type=>type_module, :first_arg => name,  :list => list,
+                                        :block => block,         :opt_hash=>opt_hash, :definer => self)
+      end
+      def get_option_values!
+        if (@values)
+          @values.clear
+        else
+          @values = run_definitions
+        end
+        @values
+      end
+      # @return [OptionValues]
+      def run_definitions
+        values = OptionValues.new
+        @has_defaults = false
+        @prev = nil
+        @switches_by_name = HashLikeWriteOnceExtension[{}]
+        @switches_by_name.write_once!{|x| raise GrammarGrammarException["can't redefine #{x.inspect}"]}
+        @switches_by_type = Hash.new{|h,k| h[k]=[]; h[k]}
+        pass_this_to_op = lambda do |opts|
+          @option_parser = opts
+          @definitions.each do |definition|
+            first_arg = definition.first_arg.to_s
+            first_arg = %{--#{first_arg} VALUE} unless /^-/ =~ first_arg # hack1 for positionals
+            switch = opts.define(first_arg,*definition.list,&definition.block)
+            switch = definition.hipe_type.enhance_switch(switch, definition)
+            @has_defaults ||= switch.has_default?
+            @switches_by_type[switch.hipe_type] << switch
+            @switches_by_type[Positional] << switch if (Positional===switch) # "abstract base class" like hipe-type
+            @switches_by_name[switch.main_name] = switch
+            orig_block = switch.block
+            new_block = if (orig_block)
+              lambda do |it|
+                It.make_it_an_It(it, self, switch)
+                result_from_original = orig_block.call(it)
+                un_it = It.make_it_not_an_It(result_from_original)
+                values[switch.main_name] = un_it
               end
-              @switches_by_name[switch.main_name] = switch
-              orig_block = switch.block
-              new_block = Proc.new() do |it|
-                if orig_block
-                  It.make_it_an_It(it, self, switch)
-                  result_from_original = orig_block.call(it)
-                  un_it = It.make_it_not_an_It(result_from_original)
-                  opt_values[switch.main_name] = un_it
-                else
-                  opt_values[switch.main_name] = it
-                end
-              end
-              switch.instance_variable_set('@block',new_block)
+            else
+              lambda{|it| values[switch.main_name] = it}
             end
+            switch.instance_variable_set('@block',new_block) # hack2 - kind of the core of this whole thing
           end
-          OptionParser.new(&pass_this_to_op) # really confusing -- a bunch of stuff above in this scope gets set
         end
-        opt_values
+        OptionParser.new(&pass_this_to_op)
+        values
       end
-    end
-    def self.apply_defaults(switches, argv)
-      shorts, longs = [], []
-      argv.grep(/(?:^(-[a-z0-9]))|(?:^(--[a-z0-9][-a-z0-9]+))/){|_| shorts<<$1 if $1; longs<<$2 if $2 }
-      switches.select{|x| (x.short & shorts).size == 0 and (x.long & longs).size == 0 }.each do |x|
-        argv.concat( (x.long.size > 0 ) ? [x.long[0], x.default ] : [%{#{x.short[0]}#{x.default}}] )
+      def apply_defaults(type, argv)
+        return unless @switches_by_type.has_key? type
+        shorts, longs = [], []
+        argv.grep(/(?:^(-[a-z0-9]))|(?:^(--[a-z0-9][-a-z0-9]+))/){|_| shorts<<$1 if $1; longs<<$2 if $2 }
+        @switches_by_type[type].select do |v|
+          v.has_default? and
+          (v.short & shorts).size == 0 and
+          (v.long & longs).size == 0
+        end.each do |x|
+          argv.concat( (x.long.size > 0 ) ? [x.long[0], x.default ] : [%{#{x.short[0]}#{x.default}}] )
+        end
       end
     end
     class Cli
-      attr_reader :commands, :parent_cli, :output_registrar, :out, :universals, :opts
+      include CanDefine
+      attr_reader :commands, :parent_cli, :output_registrar, :out, :opts, :switches_by_name
       attr_accessor :description, :plugin_name, :default_command, :program_name, :config
       def initialize(klass)
         @app_class = klass
         @app_instance = @plugins = @default_command = nil
         @commands = Commands.new(self)
         @out = Out.new
-        @universals = []
+        @definitions = []
+        @gracefuls = [ lambda{|e| if (OptionParser::ParseError===e) then e end } ]
       end
       def dup_for_app_instance(instance)
         spawn = self.dup
@@ -137,47 +142,38 @@ module Hipe
       def command_prefix
         @plugin_name ? %{#{@parent_cli.command_prefix}#{@plugin_name}:} : nil
        end
+      def option(name,*list,&block);  add_definition(Universal, name, list, block) end
       def universals
-        parse_universals if @switches_by_name.nil?
-        @switches_by_name
+        return @universals if @universals
+        get_option_values!
+        @universals = @switches_by_type[Universal]
       end
-      def parse_universals
-        definition = Hipe::Cli.definition_proc(@universals)
-        instance_eval(&definition)
-      end
-      def parse_universal_values(argv)
-        univ_values = Hipe::OpenStructLike[parse_universals]
-        # oh boy..find the first instance of a token in argv that looks like a switch for which we
-        # have no corresponding short or long switch.
-        univ = @switches_by_name.values.map{|x| x.short + x.long }.flatten
+      def universal_option_values(argv)
+        return nil if @definitions.size == 0
+        univ_values = get_option_values!
+        # find the first token in argv that looks like a switch for which we
+        # have no corresponding short or long switch.  ick!
+        univ = @switches_by_name.values.map{|x| x.short + x.long}.flatten
         idx = argv.find_index{|x| (md=/^(-[a-z0-9])|(--[a-z0-9][-a-z0-9_]*)/i.match(x)) && (univ & md.captures).size == 0}
         later = (idx) ? argv.slice!(idx, argv.size-idx) : []
-        if ((sw=@switches_by_name.values.select{|x| x.has_default?}).size > 0) then Hipe::Cli.apply_defaults(sw, argv) end
+        apply_defaults(Universal, argv) if @has_defaults
         @option_parser.parse!(argv)
         argv.concat(later)
         univ_values
       end
-      def run argv # cli
+      def run argv
         begin
-          univ_values = parse_universal_values(argv) if (@universals.size>0)
-          @opts = univ_values
+          @opts = @definitions.size > 0 ? universal_option_values(argv) : nil
           @app_instance.before_run if @app_instance.respond_to?(:before_run)
           if (cmd = @commands[name = (argv.shift || @default_command)])
-            rs = cmd.run(argv,univ_values)
+            rs = cmd.run(argv,@opts)
             rs.execution_context = :cli if rs.respond_to?("execution_context=")
             rs.nil? ? '' : rs
           else
             bad_command(name)
           end
         rescue ::Exception => e
-          if Exception.graceful_list?(e)
-            e = ParseErrorExtension.enhance_if_necessary(e,self)
-            ret = ValidationFailures.new([e])
-            ret.execution_context = :cli
-            return ret
-          else
-            raise e
-          end
+          if ret = graceful?(e) then ret else raise(e) end
         end
       end
       def bad_command(name)
@@ -190,21 +186,28 @@ module Hipe
       def program_name
         @program_name || (@parent_cli ? @parent_cli.program_name : File.basename($0,'.*'))
       end
-      def help_recursive(argv,depth)
-        return '' unless argv[0] =~ /^(?:-h|--help|-\?|help)$/
-        if (depth == 0) then ret = %{Unfortunately there is no help if you want help on #{argv.shift}}
-        elsif (depth > 6) then return "  [...[...[..[.]]]]"
+      def help_recursive(depth, max)
+        if (max > 6) then return '[...[...[..[.]]]]' end
+        if (depth>=max) then return '' end
+        if (depth==0)
+          ret = %{Unfortunately there is no help if you want help on help}
         else
-          use_depth = (depth > 3) ? (rand(5)+1) : depth
+          use_depth = (depth > 4) ? (rand(5)+1) : depth
           adv = case use_depth; when 1..2 then ' in turn'; when 3 then ' as you probably guessed'; else ''; end
-          ret = %{, which#{adv} does not have help for "#{argv.shift}"}
+          ret = %{, which#{adv} does not have help for help}
         end
-        ret << help_recursive(argv,depth+1) if argv.size > 0
+        ret << help_recursive(depth+1,max)
         ret
       end
-      def help(*argv)
-        return help_recursive(argv,0) if argv.size > 0 && argv[0] =~ /^(?:-h|--help|-\?|help)$/
-        opts = OptionParser.new # hack just to use its display.  See Version 0.0.2 also
+      def graceful?(e);
+        rs = nil
+        @gracefuls.detect{|graceful| rs = graceful.call(e)}
+        rs
+      end
+      def graceful(&block); @gracefuls << block end
+      def help(command_name,opts)
+        return help_recursive(0,opts.table.values.flatten.size) if command_name.nil? && (opts.keys & [:h, :help, :"?"]).size > 0
+        opts = OptionParser.new # hack3 just to use its display.  See Version 0.0.2 also
         list = opts.instance_variable_get('@stack')[2]
         commands_size = @commands.size
         opts.banner = generate_banner + "\n\n" +
@@ -221,7 +224,7 @@ module Hipe
         lines <<  (%{#{program_name} - #{description}\n}) if description
         left = %{usage: #{program_name}}
         right = Hipe::AsciiTypesetting::FormattableString[ [
-          ' ' + universals.values.map{|x|%{#{x.syntax}} } * ' ',
+          ' ' + universals.map{|x|%{#{x.syntax}} } * ' ',
           ' ' + @commands.select{|i,cmd| OptionyLookingCommand === cmd}.map{|c|
             '[' + ([c[1].short_name,c[1].long_name].compact * '|') + ']'
           }.uniq * ' ',
@@ -230,9 +233,6 @@ module Hipe
         lines << left + right.word_wrap_once!(right_column_width)
         lines << right.word_wrap!(right_column_width).indent!(left.length) if right.size > 0
         lines * "\n"
-      end
-      def option(name,*list,&block)
-        @universals << Hipe::Cli.make_definition(Universal, name, list, block)
       end
     end
     class Out
@@ -269,9 +269,9 @@ module Hipe
           else
             plugin_name, name = /^([^:]+):(.+)/.match(name).captures
             unless (plugin = @cli.plugins[plugin_name])
-              raise Exception.f( %{unrecognized plugin "#{plugin_name}". Known plugins are }+
-                Hipe::Lingual::List[@cli.plugins.map{|x| %{"#{x[1].cli.plugin_name}"} } ].and(),
-                :type=>:unrecognized_plugin_name)
+              msg = %{Unrecognized plugin "#{plugin_name}". Known plugins are }+
+                Hipe::Lingual::List[@cli.plugins.map{|x| %{"#{x[1].cli.plugin_name}"}}].and()
+              raise ValidationFailure.f(:message =>msg, :type=>:unrecognized_plugin_name)
             end
           end
           plugin.cli.commands[name]
@@ -291,7 +291,11 @@ module Hipe
     module CommandFactory
       def self.command_factory(name, *list, &block)
         o = parse_grammar(name,*list)
-        (o.short_name || o.long_name) ? OptionyLookingCommand.new(o, &block) : Command.new(o, &block)
+        if (block.nil? && 'h' == o.short_name || 'help' == o.long_name )
+          block = lambda{ option('-h'); option('-?'); option('--help'); optional('command_name') }
+        end
+        command = (o.short_name || o.long_name) ? OptionyLookingCommand.new(o, &block) : Command.new(o, &block)
+        command
       end
       LONG_NAME_WITHOUT_ARGS = /^--([-_a-z0-9]+)/i
       # optparse does something similar, too but we don't use it to parse commands themselves because
@@ -329,10 +333,11 @@ module Hipe
         switch.init_as_hipe_type(my_info)
         switch
       end
-      def init_as_hipe_type(my_info)
-        @command = my_info.command
-        @hipe_type = my_info.hipe_type
-        opt_hash = my_info.opt_hash
+      def init_as_hipe_type(definition)
+        @has_default = false
+        @command = definition.definer
+        @hipe_type = definition.hipe_type
+        opt_hash = definition.opt_hash
         @errors = nil
         if (opt_hash)
           if opt_hash.has_key? :default
@@ -382,18 +387,18 @@ module Hipe
     module Positional # a pseudo "abstract" "module" for required and optional
       include CommandElement
       def self.enhance_switch(*args); CommandElement.enhance_switch(*args); end
-      def prepare_for_display
+      def prepare_for_display #hack4
         @long[0].gsub!(/^--/,'')
         @arg = nil
       end
-      def prepare_for_parse
-        @long[0].replace(%{--#{@long[0]}})
+      def prepare_for_parse #hack4
+        @long[0].gsub!(/^(?!--)/,'--')
         @arg = ' '
       end
-      def init_as_hipe_type(*args)
-        super(*args)
-        prepare_for_display
-      end
+      #def init_as_hipe_type(*args)  # @todo
+      #  super(*args)
+      #  prepare_for_display
+      #end
     end
     module Required  # a required positional argument
       include Positional
@@ -414,19 +419,20 @@ module Hipe
       include Switch
       def self.enhance_switch(*args); Switch.enhance_switch(*args); end
     end
-    # This is just a plain old (ordered) hash for storing the values from *all* command elements
-    # (required, optional, options, splat) during the parse.  The difference is that when a value
-    # is attempted to be added with when that key already exists, the existing value is turned
-    # into an array and the new value is added to it.   This is a lazy way to allow any
-    # option to be specified multiple times. (i don't know if/how OptParse handles that...@todo)
-    #
-    class OptionValues < OrderedHash
+    # This holds all of the values from all the command elements (universal, options, required, optional, and splat)
+    # It is an OpenStruct that can also be accessed as a hash, and its internal table is an
+    # OrderedHash.  When a value is stored for a key that already exists,
+    # the existing value is turned into an array and the new value is added to it.
+    # This is a lazy way to allow any option to be specified multiple times.
+    # (i don't know if/how OptParse handles that...@todo)
+    class OptionValues < OpenStructExtended
       def initialize
         super()
+        use_ordered_hash!
         @changed_to_array = {}
       end
       def []=(x,y)
-        if (has_key?(x))
+        if (@table.has_key?(x))
           unless (@changed_to_array[x])
             super(x,[self[x]])
             @changed_to_array[x] = true
@@ -435,6 +441,10 @@ module Hipe
         else
           super(x,y)
         end
+      end
+      def clear
+        @changed_to_array.clear
+        @table.clear
       end
     end
     module It
@@ -502,6 +512,7 @@ module Hipe
       def options;             @command.switches_by_type[Switch] end
       def requireds;           @command.switches_by_type[Required] end
       def optionals;           @command.switches_by_type[Optional] end
+      def universals;          @command.switches_by_type[Universal] end
       # splat is always only zero or one element, no need for plural alias
       def splat; @command.switches_by_type[Splat].size > 0 ? @command.switches_by_type[Splat][0] : false end
       alias_method :switches,   :options
@@ -510,7 +521,8 @@ module Hipe
         raise NoMethodError.new("undefined method `#{name}' for #{self.inspect}")
       end
     end
-    module CommandLike # probably no reason to be a module
+    module CommandLike # probably no reason to be its own module @todo
+      include CanDefine
       attr_accessor :app_instance
       attr_reader :description
       def take_names(o) # take the contents of a parse tree containing main_name, long_name, etc
@@ -535,10 +547,10 @@ module Hipe
       end
     end
     class Command
-      attr_reader :option_parser, :switches_by_name, :switches_by_type, :opt_values # for testing and debugging only
+      attr_reader :option_parser, :switches_by_name, :switches_by_type, :opt_values
       include CommandLike
       def initialize(names, &block)
-        @definitions = @elements = @switches_by_name = @switches_by_type = @app_instance = @elements = nil
+        @elements = @switches_by_name = @switches_by_type = @app_instance = @elements = @definitions = nil
         @block = block
         take_names(names)
       end
@@ -547,14 +559,10 @@ module Hipe
       end
       def elements
         if @elements.nil?
-          parse_definition if (@definitions.nil?)
+          my_get_option_values!
           @elements = Elements.new(self)
         end
         @elements
-      end
-      def parse_definition(univ_values = nil)
-        definition = Hipe::Cli.definition_proc(nil, univ_values)
-        instance_eval(&definition)
       end
       def help_switch
         elements.switches.each do |s|
@@ -567,37 +575,53 @@ module Hipe
         validation_failure.command ||= self
         @validation_failures.push(validation_failure)
       end
-      def run(argv,univ_values = nil)
+      def my_get_option_values! # ugly name because no inheiritance with modules
+        if (@values.nil?)
+          @definitions = []
+          instance_eval(&@block) if (@block) # runs all the option(), required(), optional(), splat() definitions
+          get_option_values! # sets @values
+        else
+          get_option_values! # if there are values clear them
+        end
+        @values
+      end
+      def run(argv,univ_values=nil)
         @validation_failures = []
-        ret = opt_values = args_for_implementer = nil  #@TODO SEE WHAT BREAKS IF YOU MAKE THIS A MEMBER VARIABLE
+        ret = merged_values = args_for_implementer = nil
+        last_arg_is_optional = nil
         begin
-          return run_with_application(argv,univ_values) unless @block #if there is no definition block we pass the args raw
-          opt_values = parse_definition(univ_values)
-          Hipe::OpenStructLike[opt_values]
+          values = my_get_option_values! # false if no definition block
+          merged_values = values # if the below parse triggers an interrupt
           ret = catch(:interrupt_validation) do
-            sws = @switches_by_type
-            if (sw = sws[Switch].select{|x| x.has_default? }).size>0 then Hipe::Cli.apply_defaults(sw, argv) end
-            opts.parse!(argv) if sws[Switch].size > 0
-            sws[Positional].each{|x| x.prepare_for_parse }  # bad hack.  now we need the dashes
-            if sws[Positional].size > 0
-              new_argv = turn_positionals_into_switches( sws[Positional], argv)
-              if (sw = sws[Positional].select{|x| x.has_default? }).size>0 then Hipe::Cli.apply_defaults(sw, new_argv) end
+            apply_defaults(Switch, argv) if @has_defaults
+            opts.parse!(argv) if @switches_by_type[Switch].size > 0
+            last_arg_is_optional = (univ_values && @switches_by_type[Switch].size==0)
+            @switches_by_type[Positional].each{|x| x.prepare_for_parse }  # bad hack4.  now we need the dashes
+            if @switches_by_type[Positional].size > 0
+              new_argv = turn_positionals_into_switches( @switches_by_type[Positional], argv)
+              apply_defaults(Positional,new_argv) if @has_defaults
               opts.parse!(new_argv)
             end
-            missing = (sws[Required].map{|x| x.main_name} - opt_values.keys).map{|x| @switches_by_name[x]}
+            missing = (@switches_by_type[Required].map{|x| x.main_name} - values.keys).map{|x| @switches_by_name[x]}
             error_missing(missing) if missing.size > 0
             error_needless(argv) if (argv.size > 0)
-            args_for_implementer = flatten_args(sws, opt_values,!!univ_values)
+            merged_values =
+               if ( values==false && univ_values.nil? ) then nil
+            elsif ( values==false && univ_values ) then univ_values
+            elsif ( values        && univ_values.nil? ) then values
+            elsif ( values        && univ_values ) then univ_values.merge!(values); univ_values
+            else; raise Exception['never'] end
+            args_for_implementer = flatten_args(@switches_by_type, merged_values, !univ_values.nil?)
             Interrupt[:because=>:validation_failures] if @validation_failures.size > 0
           end
           unless Interrupt === ret
-            ret = run_with_application(args_for_implementer)
+            ret = run_with_application(args_for_implementer, last_arg_is_optional)
           end
         rescue ::Exception => e
-          if Exception.graceful_list?(e)
-            e = ParseErrorExtension.enhance_if_necessary(e,self)
+          if new_e = @app_instance.cli.graceful?(e)
+            newer_e = ParseErrorExtension.enhance_if_necessary(new_e,self)
             ret = Interrupt.new(:because=>:validation_failures)
-            @validation_failures << e
+            @validation_failures << newer_e
           else
             raise e
           end
@@ -605,7 +629,7 @@ module Hipe
         if (Interrupt===ret)
           ret = case ret.because
             when :validation_failures then ValidationFailures.new(@validation_failures)
-            when :goto then @opt_values = opt_values; instance_eval(&ret.block)
+            when :goto then @opt_values = merged_values; instance_eval(&ret.block)
             when :done then ret.return
             else ret end
           @validation_failures = nil # important.  command is supposed to be stateless ?
@@ -634,7 +658,7 @@ module Hipe
       def error_missing(missing)
         names = missing.map{|x| x.surface_name }
         e = OptionParser::MissingArgument.new(Hipe::Lingual::List[names].and())
-        e.reason = Hipe::Lingual.en{ sp(np(adjp('missing','required'),'argument',names.size)) }.say
+        e.reason = (Hipe::Lingual.en{ sp(np(adjp('missing','required'),'argument',names.size)) }.say.capitalize)
         raise e
       end
       def error_needless(argv)
@@ -653,12 +677,14 @@ module Hipe
       def opts; @option_parser; end
       def help; # be sure to circumvent normal validation of the command if the user wants to display help for a command
         lambda do
+          switches_by_type[Positional].each{|x| x.prepare_for_display }  # hack4.  now we don't want the dashes
           cli = app_instance.cli
-          re = Regexp.new('Usage: '+Regexp.escape(cli.program_name)+' \[options\]')
+          cli.program_name
+          re = Regexp.new('Usage: '+Regexp.escape(@option_parser.program_name)+' \[options\]')
           if  re =~ @option_parser.banner # if it's the default generated banner thing...
             s = ''
             s << %{#{full_name} - #{description}\n\n} if description
-            s << %{Usage: #{app_instance.cli.program_name} #{full_name}}
+            s << %{Usage: #{cli.program_name} #{full_name}}
             s << ' '+elements.switches.map{|x| x.syntax }.join(' ') if elements.switches.size > 0
             s << ' '+elements.required.map{|x| x.main_name }.join(' ') if (elements.required.size > 0)
             s << ' '+elements.optionals.map{|x| %{[#{x.main_name}]} }.join(' ') if (elements.optionals.size > 0)
@@ -685,13 +711,13 @@ module Hipe
           raise Exception.f(%{#{state_symbol} should not appear after #{@prev}})
         end
         @prev = state_symbol
-        @definitions << Hipe::Cli.make_definition(type_module,name,list,block)
+        add_definition(type_module,name,list,block)
       end
-      def run_with_application(argv,univ_values=nil)
+      def run_with_application(argv,last_arg_is_optional)
         if @app_instance.respond_to?(as_method_name)
-          if (univ_values) # then there were no command-level options defined and the implementer can decide if it wants these
-            arity = @app_instance.method(as_method_name).arity
-            argv << univ_values if arity.abs >= (argv.length + 1)
+          # if there were no command-level options defined but app-wide options, the implementer can decide if it wants these
+          if (last_arg_is_optional && (arity = @app_instance.method(as_method_name).arity) > 0 && arity < argv.size)
+            argv.pop
           end
           begin
             @app_instance.send(as_method_name, *argv)
@@ -738,7 +764,7 @@ module Hipe
       end
       def []=(name, value)
         name = name.to_s
-        raise GrammarGrammarException.f(%{Can't redefine a plugin ("#{name}")}) if has_key?(name)
+        raise GrammarGrammarException[%{Can't redefine a plugin ("#{name}")}] if has_key?(name)
         super(name,value)
       end
       def [](name)
@@ -833,6 +859,7 @@ module Hipe
         end
       end
       alias_method :msg, :message # note1
+      alias_method :to_s, :message
       protected
       # [:message, :message_template, :reason, :command, :command_element, :provided_value].each do |x| ..
       def initialize(info)
@@ -875,16 +902,6 @@ module Hipe
       end
     end
     class Exception < ::Exception
-      @graceful_list = []
-      def self.graceful_list?(e)
-        @graceful_list.each do |mod|
-          return true if mod===e
-        end
-        false
-      end
-      class << self
-        attr_reader :graceful_list
-      end
       attr_reader :details
       protected
       def initialize(msg,details)
@@ -906,7 +923,6 @@ module Hipe
         klass.new(msg,details)
       end
     end
-    Exception.graceful_list << OptionParser::ParseError
     class GrammarGrammarException < Hipe::Exception; end
     module BuiltinPredicates
       It.register_predicates(self)
