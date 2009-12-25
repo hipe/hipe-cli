@@ -276,7 +276,9 @@ class HipeCliCli
 
     opts.run_with ||= "command"
     (test_cases).each_with_index do |test_case, idx|
-      putz %{\n  it "#{test_case.comment||'should work'} (#{letter}-#{idx})" do}
+      comment = test_case.comment || test_case.prompt
+      should = %{#{comment} (#{letter}-#{idx})}.dump
+      putz %{\n  it #{should} do}
       x = nil
       ge(%{Parse failure of prompt: Expecting #{cli.program_name} had #{x}}) unless
         (cli.program_name==(x=test_case.parsed_prompt.shift))
