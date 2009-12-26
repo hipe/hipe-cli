@@ -65,7 +65,7 @@ describe AppD7, "fallatious" do
   it "should require options with args for default (d7)" do
     @app = AppD7.new
     e = lambda{ @app.cli.run(['blah'])}.should.raise(Hipe::Cli::GrammarGrammarException)
-    e.message.should.match %r{needs_arg_here}
+    e.message.should.match %r{needs-arg-here}
   end
   it "should require that the implementing thing be the same signature (d8)" do
     e = lambda{ @app.cli.run(['blah-blah','one','two'])}.should.raise(Hipe::Cli::GrammarGrammarException)

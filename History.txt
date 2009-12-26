@@ -1,4 +1,4 @@
-== 0.0.9 (this bleeding edge version) 
+== 0.0.9 / 2009-12-26 
   * in Hipe::Cli::Cli#run() wrap String response in a thing that responds to valid? if necessary.
   * added make_it_not_an_It so that method_missing doesn't look for predicates in the implementing method
   * gets_opened() predicate now returns a plain old filehandle, not an OpenStruct
@@ -39,4 +39,6 @@
   * existence (apologies to webrat)
 == THE DISTANT FUTURE, THE YEAR 2000
   * splat
-  * generated descriptions for command elements from dsl
+  * generate descriptions for command elements from dsl
+  * address @todo's in the code
+  * maybe or maybe not get rid of optiony-looking commands

@@ -18,7 +18,7 @@ module Hipe
       klass.instance_variable_set('@cli', cli)
       klass.extend AppClassMethods
       klass.send(:define_method, :cli) do
-        @cli ||= cli.dup_for_app_instance(self)
+        @cli ||= cli.dup_for_app_or_raise(self)
       end
       AppClasses[klass.to_s] = klass
     end
@@ -98,23 +98,23 @@ module Hipe
     end
     class Cli
       include CanDefine
-      attr_reader :commands, :parent_cli, :output_registrar, :out, :opts, :switches_by_name
+      attr_reader :commands, :parent_cli, :out, :opts, :switches_by_name
       attr_accessor :description, :plugin_name, :default_command, :program_name, :config
       def initialize(klass)
         @app_class = klass
-        @app_instance = @plugins = @default_command = nil
+        @app_or_raise = @plugins = @default_command = nil
         @commands = Commands.new(self)
         @out = Out.new
         @definitions = []
         @gracefuls = [ lambda{|e| if (OptionParser::ParseError===e) then e end } ]
       end
-      def dup_for_app_instance(instance)
+      def dup_for_app_or_raise(instance)
         spawn = self.dup
-        spawn.init_for_app_instance(instance)
+        spawn.init_for_app_or_raise(instance)
         spawn
       end
-      def init_for_app_instance(instance)
-        @app_instance = instance
+      def init_for_app_or_raise(instance)
+        @app_or_raise = instance
         @commands = @commands.dup
         @commands.cli = self
         if (@plugins)
@@ -122,16 +122,16 @@ module Hipe
           @plugins.cli = self
         end
       end
-      def init_as_plugin(parent_app_instance, name, plugin_app_instance)
-        @parent_cli = parent_app_instance.cli
+      def init_as_plugin(parent_app_or_raise, name, plugin_app_or_raise)
+        @parent_cli = parent_app_or_raise.cli
         @plugin_name = name
-        init_for_app_instance(plugin_app_instance)
+        init_for_app_or_raise(plugin_app_or_raise)
       end
-      def app_instance!
-        raise "there is no app instance!" unless @app_instance
-        @app_instance
+      def app_or_raise!
+        raise "there is no app instance!" unless @app_or_raise
+        @app_or_raise
       end
-      def app_instance; @app_instance; end
+      def app_or_raise; @app_or_raise; end
       def does name, *list, &block
         @commands.add(name, *list, &block)
       end
@@ -162,11 +162,11 @@ module Hipe
         univ_values
       end
       def run argv
-        begin
-          @opts = @definitions.size > 0 ? universal_option_values(argv) : nil
-          @app_instance.before_run if @app_instance.respond_to?(:before_run)
+        begin # catch all exceptions, check them against the "graceful list"
+          univ = universal_option_values(argv)
+          @app_or_raise.before_run(univ) if @app_or_raise.respond_to?(:before_run)
           if (cmd = @commands[name = (argv.shift || @default_command)])
-            rs = cmd.run(argv,@opts)
+            rs = cmd.run(argv,univ)
             rs.execution_context = :cli if rs.respond_to?("execution_context=")
             rs.nil? ? '' : rs
           else
@@ -261,7 +261,7 @@ module Hipe
         name = aliaz.to_s
         name = @cli.default_command.to_s if (name=='' && @cli.default_command)
         if (cmd = super(@aliases[name]))
-          cmd.app_instance = @cli.app_instance
+          cmd.app_or_raise = @cli.app_or_raise
           cmd
         elsif name.include? ':' or (plugin = @cli.plugins[name])
           if (plugin)
@@ -326,7 +326,7 @@ module Hipe
       end
     end
     module CommandElement #required arguments, optional arguments, options (switches) and splat
-      attr_accessor :app_instance
+      attr_accessor :app_or_raise
       attr_reader :description, :default, :hipe_type, :command
       def self.enhance_switch(switch,my_info)
         switch.extend my_info.hipe_type
@@ -342,23 +342,16 @@ module Hipe
         if (opt_hash)
           if opt_hash.has_key? :default
             if (@arg.nil? or !(/[^ ]/=~@arg) or (/\[\]/=~@arg))
-              raise Exception.f(%{for "#{main_name}" to take a default value it must take a required arg, not "#{@arg}"})
+              raise Exception.f(%{for "#{long.first||short.first}" to have a default value it must have a }+
+               %{required argument in its definition (e.g. "#{long.first||short.first} ARG") not "#{@arg}"})
             end
             set_default(opt_hash.delete(:default))
           end
         end
       end
+      # more code in 89af4ffda0f3b8c57cc0d6e96e5d1f463ce9e98a
       def main_name; switch_name.gsub('-','_').downcase.to_sym; end
-        #swt
-        # str = nil                      @ todo
-        # if (@long && @long.size > 0)
-        #   str = /^-?-?(.+)/.match(@long[0]).captures[0]
-        # elsif (@short && @short.size > 0)
-        #   str = /^-?(.+)/.match(@short[0]).captures[0]
-        # end
-        # str.gsub('-','_').downcase.to_sym
-      #end
-      def surface_name
+      def surface_name  # @todo get rid of some of the redundancy here
         /^-?-?(.+)/.match(@long[0]).captures[0]
       end
       def human_name
@@ -415,7 +408,7 @@ module Hipe
       include CommandElement
       def self.enhance_switch(*args); CommandElement.enhance_switch(*args); end
     end
-    module Universal # application-level options that can appear before the command
+    module Universal # app_or_raise-level options that can appear before the command
       include Switch
       def self.enhance_switch(*args); Switch.enhance_switch(*args); end
     end
@@ -523,7 +516,7 @@ module Hipe
     end
     module CommandLike # probably no reason to be its own module @todo
       include CanDefine
-      attr_accessor :app_instance
+      attr_accessor :app_or_raise
       attr_reader :description
       def take_names(o) # take the contents of a parse tree containing main_name, long_name, etc
         o.instance_variable_get('@table').each do |name,value|   # see CommandFactory#parse_grammar
@@ -532,7 +525,7 @@ module Hipe
       end
       def main_name; @main_name end
       def full_name # always return a string here! optparse wants it for length()
-        %{#{@app_instance.cli.command_prefix}#{main_name}}
+        %{#{@app_or_raise.cli.command_prefix}#{main_name}}
       end
       def as_method_name; main_name.to_s.gsub('-','_').downcase.to_sym end
       def desc_arr  # if we wanna be like optparse, return an array.
@@ -550,7 +543,7 @@ module Hipe
       attr_reader :option_parser, :switches_by_name, :switches_by_type, :opt_values
       include CommandLike
       def initialize(names, &block)
-        @elements = @switches_by_name = @switches_by_type = @app_instance = @elements = @definitions = nil
+        @elements = @switches_by_name = @switches_by_type = @app_or_raise = @elements = @definitions = nil
         @block = block
         take_names(names)
       end
@@ -615,10 +608,10 @@ module Hipe
             Interrupt[:because=>:validation_failures] if @validation_failures.size > 0
           end
           unless Interrupt === ret
-            ret = run_with_application(args_for_implementer, last_arg_is_optional)
+            ret = run_with_app_or_raise(args_for_implementer, last_arg_is_optional)
           end
         rescue ::Exception => e
-          if new_e = @app_instance.cli.graceful?(e)
+          if new_e = @app_or_raise.cli.graceful?(e)
             newer_e = ParseErrorExtension.enhance_if_necessary(new_e,self)
             ret = Interrupt.new(:because=>:validation_failures)
             @validation_failures << newer_e
@@ -678,7 +671,7 @@ module Hipe
       def help; # be sure to circumvent normal validation of the command if the user wants to display help for a command
         lambda do
           switches_by_type[Positional].each{|x| x.prepare_for_display }  # hack4.  now we don't want the dashes
-          cli = app_instance.cli
+          cli = app_or_raise.cli
           cli.program_name
           re = Regexp.new('Usage: '+Regexp.escape(@option_parser.program_name)+' \[options\]')
           if  re =~ @option_parser.banner # if it's the default generated banner thing...
@@ -713,24 +706,24 @@ module Hipe
         @prev = state_symbol
         add_definition(type_module,name,list,block)
       end
-      def run_with_application(argv,last_arg_is_optional)
-        if @app_instance.respond_to?(as_method_name)
+      def run_with_app_or_raise(argv,last_arg_is_optional)
+        if @app_or_raise.respond_to?(as_method_name)
           # if there were no command-level options defined but app-wide options, the implementer can decide if it wants these
-          if (last_arg_is_optional && (arity = @app_instance.method(as_method_name).arity) > 0 && arity < argv.size)
+          if (last_arg_is_optional && (arity = @app_or_raise.method(as_method_name).arity) > 0 && arity < argv.size)
             argv.pop
           end
           begin
-            @app_instance.send(as_method_name, *argv)
+            @app_or_raise.send(as_method_name, *argv)
           rescue ArgumentError => e
             msg = nil
             if md = /wrong number of arguments \((\d+) for (\d+)\)/.match(e.message)
-              msg = %{Your #{@app_instance.class}\##{as_method_name}() must take #{md[1]} arguments to }+
+              msg = %{Your #{@app_or_raise.class}\##{as_method_name}() must take #{md[1]} arguments to }+
               %{correspond to the grammar defined for the command. You take #{md[2]}.}
             end
             raise msg.nil? ? e : Exception.f(msg) # re-raise original unless we were able to mess w/ it
           end
         elsif([:help].include? as_method_name)
-          @app_instance.cli.help(*argv)
+          @app_or_raise.cli.help(*argv)
         else
           raise Exception.f(%{Please implement "#{as_method_name}"})
         end
@@ -751,7 +744,6 @@ module Hipe
     end
     class Plugins < OrderedHash
       attr_accessor :cli
-      alias_method :set, :[]= # necessary in [] because we rewrite the class with the instance using the same name
       def initialize(cli)
         @cli = cli
         @dirs = nil
@@ -760,24 +752,25 @@ module Hipe
       def <<(klass)
         raise Exception.f(%{no: "#{klass}}) unless (Class == klass.class) && klass.ancestors.include?(Hipe::Cli)
         name = klass.to_s.match(/([^:]+)$/).captures[0].gsub(/([a-z])([A-Z])/){ %{#{$1}-#{$2}}}.downcase
-        self[name] = klass
+        store(name,klass)
       end
       def []=(name, value)
         name = name.to_s
-        raise GrammarGrammarException[%{Can't redefine a plugin ("#{name}")}] if has_key?(name)
-        super(name,value)
+        raise GrammarGrammarException[%{Can't redefine a plugin ("#{name}")}] if keys.include?(name)
+        store(name,value)
       end
+      def has_key?(x); keys.include?(x) end #wierd bug @ sosy
       def [](name)
         load_all!
         name = name.to_s
-        return nil unless (plugin_class_or_app_instance = super(name))
-        if (Class===plugin_class_or_app_instance)
-          app_instance = plugin_class_or_app_instance.new
-          app_instance.cli.init_as_plugin(@cli.app_instance!, name, app_instance)
-          self.set(name,app_instance)
-          return app_instance
+        return nil unless (plugin_class_or_app_or_raise = super(name))
+        if (Class===plugin_class_or_app_or_raise)
+          app_or_raise = plugin_class_or_app_or_raise.new
+          app_or_raise.cli.init_as_plugin(@cli.app_or_raise!, name, app_or_raise)
+          store(name,app_or_raise)
+          return app_or_raise
         else
-          return plugin_class_or_app_instance # assume it is app instance!
+          return plugin_class_or_app_or_raise # assume it is app instance!
         end
       end
       def each(&block)
@@ -810,7 +803,7 @@ module Hipe
       protected
       def load_all!
         return unless @dirs
-        @cli.app_instance.before_plugins_load if @cli.app_instance.respond_to?(:before_plugins_load)
+        @cli.app_or_raise.before_plugins_load if @cli.app_or_raise.respond_to?(:before_plugins_load)
         @dirs.each do |arr|
           add_directory!(arr[0],arr[1])
         end
@@ -827,7 +820,7 @@ module Hipe
         msg = @errors.map{|x| x.msg || %{Unknown error from #{x}}}.join(' AND ')
         if :cli == @execution_context
           @errors.map{|x| x.command && x.command.help_switch ? x.command : nil }.compact.uniq.each do |x|
-            msg << %{\nSee "#{x.app_instance.cli.program_name} #{x.full_name} #{x.help_switch}" for more info.}
+            msg << %{\nSee "#{x.app_or_raise.cli.program_name} #{x.full_name} #{x.help_switch}" for more info.}
           end
         end
         msg

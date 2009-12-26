@@ -44,7 +44,7 @@ class HipeCliCli
   cli.does(:gentest, "generate tests from copy-pasted terminal output") do
     option('-h','--help','help<<self', &help)
     option('-l','--list [NUM]',"choose from a list of files in the default folder.") do |number|
-      goto{ app_instance.list_gentest_screenshots(number) }
+      goto{ application.list_gentest_screenshots(number) }
     end
     option('-o','--out-file FILE', 'write to this file instead of the default location.') do |it|
       it.must_not_exist!
