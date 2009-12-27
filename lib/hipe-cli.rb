@@ -701,7 +701,7 @@ module Hipe
       def opts; @option_parser; end
       def help; # be sure to circumvent normal validation of the command if the user wants to display help for a command
         lambda do
-          switches_by_type.each{|x| x[1].prepare_for_parse if x[1].kind_of? VisualHack } # hack4.  now we don't want the dashes
+          switches_by_name.each{|x| x[1].prepare_for_display if x[1].kind_of? VisualHack } # hack4.  now we don't want the dashes
           cli = @application.cli
           cli.program_name
           re = Regexp.new('Usage: '+Regexp.escape(@option_parser.program_name)+' \[options\]')
