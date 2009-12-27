@@ -183,6 +183,7 @@ class HipeCliCli
       struct = Hipe::OpenStructWriteOnceExtension.new(:response_lines => [])
       struct.write_once! :prompt, :result_lines
       struct.response_lines = []
+      struct.captures = {}
       struct
     }
     test_cases = []
@@ -202,12 +203,36 @@ class HipeCliCli
       state = new_state
       @notice.puts "#{(state.to_s.+'-').ljust(10,'-')}------->#{line}<------"
     }
+    directive_re = /^ *#! *(.+)/
     comment_re = /^ *# ?(.+)/
     prompt_re = Regexp.new('^'+Regexp.escape(prompt)+'(.+)')
     blank_re = /^ *$/
 
+    capture = nil
     infile.each_line do |line|
       line.chomp!
+      if (md = directive_re.match(line))
+        directive = md[1]
+        if (capture)
+          re = Regexp.new("end +"+Regexp.escape(capture.name))
+          raise gge(%{expecting #{re} had "#{line}"}) unless re =~ directive
+          current_case.captures[capture.name] = capture
+          capture = nil
+          state = :comment
+          advance.call
+        else
+          re = Regexp.new("^ *start +(.+)")
+          raise gge(%{expecting #{re} had "#{line}"}) unless (md = re.match(directive))
+          capture = OpenStruct.new
+          capture.name = md[1]
+          capture.lines = []
+        end
+        next
+      elsif (capture)
+        capture.lines << line
+        next
+      end
+
       case line
       when blank_re
         case state
@@ -241,6 +266,7 @@ class HipeCliCli
     end
     case state
     when :response then advance.call
+    when :comment then # ignore
     else raise gge(%{bad end state for to end file in: #{state.inspect}})
     end
     test_cases
@@ -301,7 +327,9 @@ class HipeCliCli
       else
         raise ArgumentError.new(%{Bad value for run_with -- "#{opts.run_with}"})
       end
-      if (test_case.response_lines.size <= 1)
+      if (test_case.captures['code'])
+        putz test_case.captures['code'].lines.map{|x| %{  #{x}}} * "\n"
+      elsif (test_case.response_lines.size <= 1)
         putz %{    y = #{test_case.response_lines.join.dump}}
         putz %{    x.to_s.chomp.should.equal y}
       else

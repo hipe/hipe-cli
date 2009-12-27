@@ -1,0 +1,14 @@
+# bacon spec/spec_gentest.rb
+# This is a gentest screenshot file. Please see hipe-cli gentest.
+
+{ 
+  "requires" : "hipe-cli/hipe-cli-cli",  
+  "description" : "test directives",
+  "construct"  : "HipeCliCli.new",
+  "prompt" : "~/c > "  
+}
+
+~/c > hipe-cli -h
+#! start code
+  x.should.match %r{usage}
+#! end code

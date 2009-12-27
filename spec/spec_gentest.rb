@@ -4,9 +4,9 @@ require 'hipe-cli/hipe-cli-cli'
 require 'hipe-core/test/bacon-extensions'
 require 'ruby-debug'
 
-class Klz
+class Paths
   def self.singleton
-    @sing ||= Klz.new
+    @sing ||= Paths.new
   end
   def initialize
     @folder = File.join(Hipe::Cli::DIR,'spec','test-gentest-screenshots')
@@ -26,26 +26,26 @@ describe "hipe-cli cli GENTEST" do
 
   it "should parse good jason one line (gt1)" do
     @a = HipeCliCli.new
-    filething = Klz.singleton.filething 'gentest-one-line-json.screenshots'
+    filething = Paths.singleton.filething 'gentest-one-line-json.screenshots'
     json = @a.parse_json_header(filething)
     json.table.keys.map{|x| x.to_s}.sort.should.equal ["construct", "describe", "letter", "prompt", "requires"]
   end
 
   it "should parse good json multi line (gt2)" do
-    filething = Klz.singleton.filething 'gentest-multi-line-json.screenshots'
+    filething = Paths.singleton.filething 'gentest-multi-line-json.screenshots'
     json = @a.parse_json_header(filething)
     json.table.keys.map{|x| x.to_s}.sort.should.equal ["construct", "describe", "letter", "module", "prompt", "relative_requires", "requires"]
   end
 
   it "should parse no json (gt3)" do
-    @filething = Klz.singleton.filething 'gentest-no-json.screenshots'
+    @filething = Paths.singleton.filething 'gentest-no-json.screenshots'
     json = @a.parse_json_header(@filething)
     json.table.keys.map{|x| x.to_s}.sort.should.equal ["describe", "letter"]
   end
 
   it "should raise on no json (gt4)" do
     @a = HipeCliCli.new
-    infile_path = Klz.singleton.filepath 'gentest-no-json.screenshots'
+    infile_path = Paths.singleton.filepath 'gentest-no-json.screenshots'
     rs = @a.cli.run(['gentest',infile_path])
     rs.valid?.should.equal false
     rs.to_s.should.match %r{missing \(construct, prompt, requires\) in json header}
@@ -55,7 +55,7 @@ describe "hipe-cli cli GENTEST" do
     Hipe::Test::Helper[Hipe::Cli].clear_writable_tmp_dir!
     @a = HipeCliCli.new
     @a.notice = Hipe::Io::BufferString.new
-    in_path = Klz.singleton.filepath 'gentest-multi-line-json.screenshots'
+    in_path = Paths.singleton.filepath 'gentest-multi-line-json.screenshots'
     out_path = File.join(Dir.pwd,'spec','writable-tmp','spec_my-genned-spec.rb')
     rs = @a.cli.run(['gentest','--out-file',out_path, in_path])
     #notice_stream.puts rs.to_s unless rs.valid?
@@ -71,7 +71,7 @@ describe "hipe-cli cli GENTEST" do
     Hipe::Test::Helper[Hipe::Cli].clear_writable_tmp_dir!
     @a = HipeCliCli.new
     @a.notice = Hipe::Io::BufferString.new
-    in_path = Klz.singleton.filepath 'gentest-multi-line-w-blanks.screenshots'
+    in_path = Paths.singleton.filepath 'gentest-multi-line-w-blanks.screenshots'
     out_path = File.join(Dir.pwd,'spec','writable-tmp','spec_my-genned-multiline-spec.rb')
     rs = @a.cli.run(['gentest','--out-file',out_path, in_path])
     #notice_stream.puts rs.to_s unless rs.valid?
@@ -94,11 +94,24 @@ describe "hipe-cli cli GENTEST" do
   it "should work when there is no comment header (gt8)" do
     @a = HipeCliCli.new
     @a.notice = Hipe::Io::BufferString.new
-    in_path = Klz.singleton.filepath 'gentest-no-comment.screenshots'
+    in_path = Paths.singleton.filepath 'gentest-no-comment.screenshots'
     out_path = File.join(Dir.pwd,'spec','writable-tmp','spec_no-comment.rb')
     rs = @a.cli.run(['gentest','--out-file',out_path, in_path])
     #notice_stream.puts rs.to_s unless rs.valid?
     rs.valid?.should.equal true
+    rs.to_s.should.match %r{Generated spec file}i
+    #notice_stream << rs
+    Hipe::Test::Helper[Hipe::Cli].clear_writable_tmp_dir!
+  end
+
+  it "should handle literal code block directives (gt9)" do
+    @a = HipeCliCli.new
+    @a.notice = Hipe::Io::BufferString.new
+    in_path = Paths.singleton.filepath 'directives.screenshots'
+    out_path = File.join(Dir.pwd,'spec','writable-tmp','directives.rb')
+    rs = @a.cli.run(['gentest','--out-file',out_path, in_path])
+    #notice_stream.puts rs.to_s unless rs.valid?
+    #rs.valid?.should.equal true
     rs.to_s.should.match %r{Generated spec file}i
     #notice_stream << rs
     Hipe::Test::Helper[Hipe::Cli].clear_writable_tmp_dir!
