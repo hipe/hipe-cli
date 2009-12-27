@@ -22,10 +22,10 @@ class AppIt4
       it.must_be_float
     }
     option('--must-exist FILENAME'){|it|
-      it.must_exist!
+      it.must_exist
     }
     option('--must-not-exist FILENAME'){|it|
-      it.must_not_exist!
+      it.must_not_exist
     }
   }
   def go(opts)

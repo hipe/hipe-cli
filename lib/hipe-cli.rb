@@ -1008,7 +1008,7 @@ module Hipe
         end
         self
       end
-      def must_exist!(message_template=nil) # as a file
+      def must_exist(message_template=nil) # as a file
         unless (File.exist?(self))
           message_template ||= %{File not found: "#{self}"}
           add_validation_failure ValidationFailure.f(:message_template=>message_template,:type=>:file_not_found)
@@ -1016,7 +1016,7 @@ module Hipe
         end
         self
       end
-      def must_not_exist!(message_template=nil,interrupt_if_exists=false) # as a file
+      def must_not_exist(message_template=nil,interrupt_if_exists=false) # as a file
         if (File.exist?(self))
           message_template ||= %{File must not exist: "#{self}"}
           add_validation_failure ValidationFailure.f(:message_template=>message_template,:type=>:file_exists)

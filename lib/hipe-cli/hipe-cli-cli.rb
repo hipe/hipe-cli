@@ -55,7 +55,7 @@ class HipeCliCli
       goto{ application.list_gentest_screenshots(number) }
     end
     option('-o','--out-file FILE', 'write to this file instead of the default location.') do |it|
-      it.must_not_exist!
+      it.must_not_exist
     end
     # option('-s','--[no-]sped-up', 'whether or not to use the shell hack to speed up rendering (default true)')
     # hidden options in the yaml file
@@ -64,7 +64,7 @@ class HipeCliCli
     # app_regen   whether or not to create a new instance of the app each time (default false)
     # describe    describe YourApp, "<your text" do
     splat('INPUT_FILE', 'the file of copy-pasted terminal stuff', :minimum => 1){ |it|
-      it.must_exist!.gets_opened('r')
+      it.must_exist.gets_opened('r')
     }
   end
 

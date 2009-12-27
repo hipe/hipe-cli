@@ -57,11 +57,11 @@ class AppPred1
   include Hipe::Cli
   cli.does(:laundry,%{the output of this might not make sense. it's just for tests}){
     required(:in_file){|it|
-      it.must_exist!()
+      it.must_exist()
       it.gets_opened('r')
     }
     required(:out_file){|it|
-      it.must_not_exist!()
+      it.must_not_exist()
       it.gets_opened('w+')
     }
   }
