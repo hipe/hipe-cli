@@ -5,7 +5,7 @@ require 'hipe-core/io/all'
 
 class AppIt4
   include Hipe::Cli
-  cli.out.class = Hipe::Io::GoldenHammer
+  cli.out.klass = Hipe::Io::GoldenHammer
   cli.does('-h','--help')
   cli.default_command = 'help'
   cli.does('go'){

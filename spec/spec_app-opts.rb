@@ -25,14 +25,14 @@ end
 
 describe "Application-level options" do
 
-  it "blah (a1)" do
-    app = AppA1.new
-    app.cli.run(['-d','--env','go','-b']).should.equal '{:debug=>true, :env=>true, :b=>true}'
+  it "should parse the global options the first time (a1)" do
+    @app = AppA1.new
+    @app.cli.run(['-d','--env','go','-b']).should.equal '{:debug=>true, :env=>true, :b=>true}'
   end
 
-  it "blah (a2)" do
-    app = AppA1.new
-    app.cli.run(['-d','--env','go']).should.equal '{:debug=>true, :env=>true}'
+  it "should parse the global options the second time (a2)" do
+    #@app = AppA1.new
+    @app.cli.run(['-d','--env','go']).should.equal '{:debug=>true, :env=>true}'
   end
 
 end

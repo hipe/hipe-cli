@@ -9,10 +9,10 @@ describe AppP1, "plugins" do
     cli4 = @app4.cli
     lambda{ cli4.app_or_raise }.should.not.raise
     cli3 = cli4.plugins[:app3].cli
-    parent_cli = cli3.parent_cli
-    parent_cli.equal?(cli4).should.equal true
-    parent_cli.app_or_raise.class.should.equal AppP4
-    parent_cli.app_or_raise.equal?(@app4).should.equal true
+    parent = cli3.parent
+    parent.equal?(cli4).should.equal true
+    parent.app_or_raise.class.should.equal AppP4
+    parent.app_or_raise.equal?(@app4).should.equal true
 
     cli3.command_prefix.should.equal "app3:"
     cli2 = cli3.plugins[:app2].cli
@@ -20,8 +20,8 @@ describe AppP1, "plugins" do
     cli1 = cli2.plugins[:app1].cli
     cli1.command_prefix.should.equal "app3:app2:app1:"
 
-    cli1.app_or_raise.cli.parent_cli.app_or_raise.
-    cli.parent_cli.app_or_raise.cli.parent_cli.app_or_raise.equal?(@app4).should.equal true
+    cli1.app_or_raise.cli.parent.app_or_raise.
+    cli.parent.app_or_raise.cli.parent.app_or_raise.equal?(@app4).should.equal true
   end
 
   it "command should report a nice long name (plug2)" do

@@ -18,7 +18,7 @@ module Hipe
       klass.instance_variable_set('@cli', cli)
       klass.extend AppClassMethods
       klass.send(:define_method, :cli) do
-        @cli ||= cli.dup_for_app_or_raise(self)
+        @cli ||= cli.dup_for_application(self)
       end
       AppClasses[klass.to_s] = klass
     end
@@ -98,23 +98,23 @@ module Hipe
     end
     class Cli
       include CanDefine
-      attr_reader :commands, :parent_cli, :out, :opts, :switches_by_name
-      attr_accessor :description, :plugin_name, :default_command, :program_name, :config
+      attr_reader :commands, :parent, :out, :opts, :switches_by_name, :app_class
+      attr_accessor :description, :plugin_name, :default_command, :program_name, :config, :application
       def initialize(klass)
         @app_class = klass
-        @app_or_raise = @plugins = @default_command = nil
+        @appplication = @plugins = @default_command = nil
         @commands = Commands.new(self)
         @out = Out.new
         @definitions = []
         @gracefuls = [ lambda{|e| if (OptionParser::ParseError===e) then e end } ]
       end
-      def dup_for_app_or_raise(instance)
+      def dup_for_application(instance)
         spawn = self.dup
-        spawn.init_for_app_or_raise(instance)
+        spawn.init_for_application(instance)
         spawn
       end
-      def init_for_app_or_raise(instance)
-        @app_or_raise = instance
+      def init_for_application(instance)
+        @application = instance
         @commands = @commands.dup
         @commands.cli = self
         if (@plugins)
@@ -122,16 +122,15 @@ module Hipe
           @plugins.cli = self
         end
       end
-      def init_as_plugin(parent_app_or_raise, name, plugin_app_or_raise)
-        @parent_cli = parent_app_or_raise.cli
+      def init_as_plugin(parent_application, name, plugin_application)
+        @parent = parent_application.cli
         @plugin_name = name
-        init_for_app_or_raise(plugin_app_or_raise)
+        init_for_application(plugin_application)
       end
-      def app_or_raise!
-        raise "there is no app instance!" unless @app_or_raise
-        @app_or_raise
+      def app_or_raise
+        raise "there is no app instance!" unless @application
+        @application
       end
-      def app_or_raise; @app_or_raise; end
       def does name, *list, &block
         @commands.add(name, *list, &block)
       end
@@ -140,7 +139,7 @@ module Hipe
       end
       alias_method :plugins, :plugin # hm
       def command_prefix
-        @plugin_name ? %{#{@parent_cli.command_prefix}#{@plugin_name}:} : nil
+        @plugin_name ? %{#{@parent.command_prefix}#{@plugin_name}:} : nil
        end
       def option(name,*list,&block);  add_definition(Universal, name, list, block) end
       def universals
@@ -164,7 +163,7 @@ module Hipe
       def run argv
         begin # catch all exceptions, check them against the "graceful list"
           univ = universal_option_values(argv)
-          @app_or_raise.before_run(univ) if @app_or_raise.respond_to?(:before_run)
+          @application.before_run(univ) if @application.respond_to?(:before_run)
           if (cmd = @commands[name = (argv.shift || @default_command)])
             rs = cmd.run(argv,univ)
             rs.execution_context = :cli if rs.respond_to?("execution_context=")
@@ -184,7 +183,7 @@ module Hipe
         s
       end
       def program_name
-        @program_name || (@parent_cli ? @parent_cli.program_name : File.basename($0,'.*'))
+        @program_name || (@parent ? @parent.program_name : File.basename($0,'.*'))
       end
       def help_recursive(depth, max)
         if (max > 6) then return '[...[...[..[.]]]]' end
@@ -236,9 +235,8 @@ module Hipe
       end
     end
     class Out
-      alias_method :actual_class, :class
-      attr_accessor :class
-      def new; @class.new end  # note this is not the class method but an instance method
+      attr_accessor :klass
+      def new; @klass.new end  # note this is not the class method but an instance method
     end
     class Commands < OrderedHash
       attr_reader :aliases
@@ -261,7 +259,7 @@ module Hipe
         name = aliaz.to_s
         name = @cli.default_command.to_s if (name=='' && @cli.default_command)
         if (cmd = super(@aliases[name]))
-          cmd.app_or_raise = @cli.app_or_raise
+          cmd.application = @cli.application || @cli.app_class # yuck
           cmd
         elsif name.include? ':' or (plugin = @cli.plugins[name])
           if (plugin)
@@ -312,7 +310,7 @@ module Hipe
             if list.size>0 and md = LONG_NAME_WITHOUT_ARGS.match(list[0])
               o.long_name = md[1]
             end
-            o.main_name = (o.long_name || o.short_name).downcase.gsub('-','_').to_sym
+            o.main_name = (o.long_name || o.short_name).gsub('-','_').to_sym
           else
             o.main_name = name
           end
@@ -326,40 +324,40 @@ module Hipe
       end
     end
     module CommandElement #required arguments, optional arguments, options (switches) and splat
-      attr_accessor :app_or_raise
-      attr_reader :description, :default, :hipe_type, :command
+      attr_accessor :application
+      attr_reader :description, :default, :hipe_type, :command, :opts
       def self.enhance_switch(switch,my_info)
         switch.extend my_info.hipe_type
-        switch.init_as_hipe_type(my_info)
+        switch.command_element_init(my_info)
         switch
       end
-      def init_as_hipe_type(definition)
+      def command_element_init(definition)
         @has_default = false
         @command = definition.definer
         @hipe_type = definition.hipe_type
-        opt_hash = definition.opt_hash
         @errors = nil
-        if (opt_hash)
-          if opt_hash.has_key? :default
-            if (@arg.nil? or !(/[^ ]/=~@arg) or (/\[\]/=~@arg))
-              raise Exception.f(%{for "#{long.first||short.first}" to have a default value it must have a }+
-               %{required argument in its definition (e.g. "#{long.first||short.first} ARG") not "#{@arg}"})
-            end
-            set_default(opt_hash.delete(:default))
+        if (definition.opt_hash)
+          definition.opt_hash.keys.each do |key|
+            raise GrammarGrammarException[%{Unrecognized option "#{key}"}] unless (respond_to?(meth=%{#{key}=}))
+            send(meth, definition.opt_hash.delete(key))
           end
         end
       end
+      def default=(value)
+        if (@arg.nil? or !(/[^ ]/=~@arg) or (/\[\]/=~@arg))
+          raise GrammarGrammarException[%{for "#{long.first||short.first}" to have a default value it must have a }+
+           %{required argument in its definition (e.g. "#{long.first||short.first} ARG") not "#{@arg}"}]
+        end
+        @has_default = true
+        @default = value
+      end
       # more code in 89af4ffda0f3b8c57cc0d6e96e5d1f463ce9e98a
-      def main_name; switch_name.gsub('-','_').downcase.to_sym; end
+      def main_name; switch_name.gsub('-','_').to_sym end
       def surface_name  # @todo get rid of some of the redundancy here
         /^-?-?(.+)/.match(@long[0]).captures[0]
       end
       def human_name
         surface_name.gsub(/-|_/,' ')
-      end
-      def set_default(val) # separate method only so that required positionals can complain
-        @has_default = true
-        @default = val
       end
       def has_default?; @has_default end
       def add_validation_failure(validation_failure)
@@ -377,27 +375,26 @@ module Hipe
         %{[#{joinme.join('|')}]}
       end
     end
-    module Positional # a pseudo "abstract" "module" for required and optional
-      include CommandElement
-      def self.enhance_switch(*args); CommandElement.enhance_switch(*args); end
-      def prepare_for_display #hack4
+    module VisualHack  # hack4
+      def prepare_for_display
         @long[0].gsub!(/^--/,'')
         @arg = nil
       end
-      def prepare_for_parse #hack4
+      def prepare_for_parse
         @long[0].gsub!(/^(?!--)/,'--')
         @arg = ' '
       end
-      #def init_as_hipe_type(*args)  # @todo
-      #  super(*args)
-      #  prepare_for_display
-      #end
+    end
+    module Positional # a pseudo "abstract" "module" for required and optional
+      include CommandElement
+      include VisualHack
+      def self.enhance_switch(*args); CommandElement.enhance_switch(*args); end
     end
     module Required  # a required positional argument
       include Positional
       def self.enhance_switch(*args); Positional.enhance_switch(*args); end
-      def set_default(val)
-        raise Exception.f(%{required arguments can't have defaults ("#{main_name}")})
+      def default=(val)
+        raise GrammarGrammarException[%{Required arguments can't have defaults ("#{main_name}").}]
       end
     end
     module Optional # an optional positional argument
@@ -406,9 +403,18 @@ module Hipe
     end
     module Splat # always at the end of the grammar
       include CommandElement
+      include VisualHack
+      attr_reader :minimum
       def self.enhance_switch(*args); CommandElement.enhance_switch(*args); end
+      def default=(val)
+        raise GrammarGrammarException[%{Required arguments can't have defaults ("#{main_name}").}]
+      end
+      def minimum=(val)
+        raise GrammarGrammarException[%{Minimum must be non-negative integer ("#{value}")}] unless val.to_s =~ /^\d+$/
+        @minimum = val.to_i
+      end
     end
-    module Universal # app_or_raise-level options that can appear before the command
+    module Universal # application-level options that can appear before the command
       include Switch
       def self.enhance_switch(*args); Switch.enhance_switch(*args); end
     end
@@ -424,12 +430,13 @@ module Hipe
         use_ordered_hash!
         @changed_to_array = {}
       end
+      alias_method :orig_store, :[]=
       def []=(x,y)
         if (@table.has_key?(x))
-          unless (@changed_to_array[x])
-            super(x,[self[x]])
-            @changed_to_array[x] = true
-          end
+           unless (@changed_to_array[x])
+             super(x,[self[x]])
+             @changed_to_array[x] = true
+           end
           self[x] << y
         else
           super(x,y)
@@ -438,6 +445,15 @@ module Hipe
       def clear
         @changed_to_array.clear
         @table.clear
+      end
+      def promote_to_array(name)
+        return if @changed_to_array[name]
+        if (@table.has_key? name)
+          orig_store(name, [self[name]])
+        else
+          orig_store(name, [])
+        end
+        @changed_to_array[x] = true
       end
     end
     module It
@@ -516,7 +532,7 @@ module Hipe
     end
     module CommandLike # probably no reason to be its own module @todo
       include CanDefine
-      attr_accessor :app_or_raise
+      attr_accessor :application
       attr_reader :description
       def take_names(o) # take the contents of a parse tree containing main_name, long_name, etc
         o.instance_variable_get('@table').each do |name,value|   # see CommandFactory#parse_grammar
@@ -525,7 +541,7 @@ module Hipe
       end
       def main_name; @main_name end
       def full_name # always return a string here! optparse wants it for length()
-        %{#{@app_or_raise.cli.command_prefix}#{main_name}}
+        %{#{@application.cli.command_prefix}#{main_name}}
       end
       def as_method_name; main_name.to_s.gsub('-','_').downcase.to_sym end
       def desc_arr  # if we wanna be like optparse, return an array.
@@ -543,7 +559,7 @@ module Hipe
       attr_reader :option_parser, :switches_by_name, :switches_by_type, :opt_values
       include CommandLike
       def initialize(names, &block)
-        @elements = @switches_by_name = @switches_by_type = @app_or_raise = @elements = @definitions = nil
+        @elements = @switches_by_name = @switches_by_type = @application = @elements = @definitions = nil
         @block = block
         take_names(names)
       end
@@ -589,15 +605,27 @@ module Hipe
             apply_defaults(Switch, argv) if @has_defaults
             opts.parse!(argv) if @switches_by_type[Switch].size > 0
             last_arg_is_optional = (univ_values && @switches_by_type[Switch].size==0)
-            @switches_by_type[Positional].each{|x| x.prepare_for_parse }  # bad hack4.  now we need the dashes
+            @switches_by_name.each{|x| x[1].prepare_for_parse if x[1].kind_of? VisualHack } # bad hack4.  now we need the dashes
             if @switches_by_type[Positional].size > 0
               new_argv = turn_positionals_into_switches( @switches_by_type[Positional], argv)
               apply_defaults(Positional,new_argv) if @has_defaults
               opts.parse!(new_argv)
             end
             missing = (@switches_by_type[Required].map{|x| x.main_name} - values.keys).map{|x| @switches_by_name[x]}
+            if (@switches_by_type[Splat].size > 0)
+              splat = @switches_by_type[Splat][0]
+              if (splat.minimum && argv.size < splat.minimum)
+                missing << splat.main_name
+              else
+                pairs = argv.slice!(0, argv.size).map{|x| [splat.long[0], x]}.flatten # maximum used to be here
+                opts.parse!(pairs)
+                values.promote_to_array(splat.main_name)
+              end
+            else
+              splat = nil
+            end
             error_missing(missing) if missing.size > 0
-            error_needless(argv) if (argv.size > 0)
+            error_needless(argv) if argv.size > 0
             merged_values =
                if ( values==false && univ_values.nil? ) then nil
             elsif ( values==false && univ_values ) then univ_values
@@ -608,10 +636,10 @@ module Hipe
             Interrupt[:because=>:validation_failures] if @validation_failures.size > 0
           end
           unless Interrupt === ret
-            ret = run_with_app_or_raise(args_for_implementer, last_arg_is_optional)
+            ret = run_with_application(args_for_implementer, last_arg_is_optional)
           end
         rescue ::Exception => e
-          if new_e = @app_or_raise.cli.graceful?(e)
+          if new_e = @application.cli.graceful?(e)
             newer_e = ParseErrorExtension.enhance_if_necessary(new_e,self)
             ret = Interrupt.new(:because=>:validation_failures)
             @validation_failures << newer_e
@@ -633,6 +661,9 @@ module Hipe
         arg_array = []
         switches[Positional].each do |switch|
           arg_array << opt_values.delete(switch.main_name) # ok if nil
+        end
+        if (switches[Splat].size > 0)
+          arg_array << opt_values.delete(switches[Splat][0].main_name)
         end
         if (switches[Switch].size > 0 || univ_values_defined)
           arg_array << opt_values # even if it is empty, but not if there were no options in the definition
@@ -670,8 +701,8 @@ module Hipe
       def opts; @option_parser; end
       def help; # be sure to circumvent normal validation of the command if the user wants to display help for a command
         lambda do
-          switches_by_type[Positional].each{|x| x.prepare_for_display }  # hack4.  now we don't want the dashes
-          cli = app_or_raise.cli
+          switches_by_type.each{|x| x[1].prepare_for_parse if x[1].kind_of? VisualHack } # hack4.  now we don't want the dashes
+          cli = @application.cli
           cli.program_name
           re = Regexp.new('Usage: '+Regexp.escape(@option_parser.program_name)+' \[options\]')
           if  re =~ @option_parser.banner # if it's the default generated banner thing...
@@ -706,24 +737,21 @@ module Hipe
         @prev = state_symbol
         add_definition(type_module,name,list,block)
       end
-      def run_with_app_or_raise(argv,last_arg_is_optional)
-        if @app_or_raise.respond_to?(as_method_name)
+      def run_with_application(argv,last_arg_is_optional)
+        if @application.respond_to?(as_method_name)
           # if there were no command-level options defined but app-wide options, the implementer can decide if it wants these
-          if (last_arg_is_optional && (arity = @app_or_raise.method(as_method_name).arity) > 0 && arity < argv.size)
+          arity = @application.method(as_method_name).arity
+          if (last_arg_is_optional && arity > 0 && arity < argv.size)
             argv.pop
           end
-          begin
-            @app_or_raise.send(as_method_name, *argv)
-          rescue ArgumentError => e
-            msg = nil
-            if md = /wrong number of arguments \((\d+) for (\d+)\)/.match(e.message)
-              msg = %{Your #{@app_or_raise.class}\##{as_method_name}() must take #{md[1]} arguments to }+
-              %{correspond to the grammar defined for the command. You take #{md[2]}.}
-            end
-            raise msg.nil? ? e : Exception.f(msg) # re-raise original unless we were able to mess w/ it
+          if (arity.abs != argv.size)
+            msg = %{Your #{@application.class}\##{as_method_name}() must take #{argv.size} arguments to }+
+            %{correspond to the grammar defined for the command. Your method's arity is #{arity}.}
+            raise Exception.f(msg)
           end
+          @application.send(as_method_name, *argv)
         elsif([:help].include? as_method_name)
-          @app_or_raise.cli.help(*argv)
+          @application.cli.help(*argv)
         else
           raise Exception.f(%{Please implement "#{as_method_name}"})
         end
@@ -763,14 +791,14 @@ module Hipe
       def [](name)
         load_all!
         name = name.to_s
-        return nil unless (plugin_class_or_app_or_raise = super(name))
-        if (Class===plugin_class_or_app_or_raise)
-          app_or_raise = plugin_class_or_app_or_raise.new
-          app_or_raise.cli.init_as_plugin(@cli.app_or_raise!, name, app_or_raise)
-          store(name,app_or_raise)
-          return app_or_raise
+        return nil unless (plugin_class_or_application = super(name))
+        if (Class===plugin_class_or_application)
+          application = plugin_class_or_application.new
+          application.cli.init_as_plugin(@cli.app_or_raise, name, application)
+          store(name,application)
+          return application
         else
-          return plugin_class_or_app_or_raise # assume it is app instance!
+          return plugin_class_or_application # assume it is app instance!
         end
       end
       def each(&block)
@@ -820,7 +848,7 @@ module Hipe
         msg = @errors.map{|x| x.msg || %{Unknown error from #{x}}}.join(' AND ')
         if :cli == @execution_context
           @errors.map{|x| x.command && x.command.help_switch ? x.command : nil }.compact.uniq.each do |x|
-            msg << %{\nSee "#{x.app_or_raise.cli.program_name} #{x.full_name} #{x.help_switch}" for more info.}
+            msg << %{\nSee "#{x.application.cli.program_name} #{x.full_name} #{x.help_switch}" for more info.}
           end
         end
         msg

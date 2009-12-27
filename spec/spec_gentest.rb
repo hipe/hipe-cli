@@ -9,7 +9,7 @@ class Klz
     @sing ||= Klz.new
   end
   def initialize
-    @folder = File.join(Hipe::Cli::DIR,'spec','gentest-screenshots')
+    @folder = File.join(Hipe::Cli::DIR,'spec','test-gentest-screenshots')
   end
   def filepath(fn)
     File.join(@folder,fn)
@@ -28,14 +28,13 @@ describe "hipe-cli cli GENTEST" do
     @a = HipeCliCli.new
     filething = Klz.singleton.filething 'gentest-one-line-json.screenshots'
     json = @a.parse_json_header(filething)
-    json.table.keys.map{|x| x.to_s}.sort.should.equal [ "describe", "klass", "letter", "prompt", "requires"]
+    json.table.keys.map{|x| x.to_s}.sort.should.equal ["construct", "describe", "letter", "prompt", "requires"]
   end
 
   it "should parse good json multi line (gt2)" do
     filething = Klz.singleton.filething 'gentest-multi-line-json.screenshots'
     json = @a.parse_json_header(filething)
-    json.table.keys.map{|x| x.to_s}.sort.should.equal ["describe", "klass", "letter", "module",
-      "prompt", "relative_requires", "requires"]
+    json.table.keys.map{|x| x.to_s}.sort.should.equal ["construct", "describe", "letter", "module", "prompt", "relative_requires", "requires"]
   end
 
   it "should parse no json (gt3)" do
@@ -49,7 +48,7 @@ describe "hipe-cli cli GENTEST" do
     infile_path = Klz.singleton.filepath 'gentest-no-json.screenshots'
     rs = @a.cli.run(['gentest',infile_path])
     rs.valid?.should.equal false
-    rs.to_s.should.match %r{missing \(klass, prompt, requires\) in json header}
+    rs.to_s.should.match %r{missing \(construct, prompt, requires\) in json header}
   end
 
   it "should parse the test cases and write a file! (gt5)" do

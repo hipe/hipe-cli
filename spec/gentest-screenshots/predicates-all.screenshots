@@ -1,4 +1,12 @@
-{"prompt":"~/c > ","requires":["examples/app-it4-all-builtin-predicates"],"class":"It4App"}
+# hipe-cli gentest spec/gentest-screenshots/predicates-all.screenshots
+# this is a screenshots file to be used with hipe-cli gentest
+{
+  "requires" : ["examples/app-it4-all-builtin-predicates"],
+  "construct" : "AppIt4.new",
+  "prompt" : "~/c > ",  
+  "description" : "predicates-all",
+  "letter" : "pa"
+}
 
 # emtpy should be ok
 ~/c > it4 go 

@@ -3,50 +3,6 @@ require 'ruby-debug'
 require 'hipe-cli'
 require Hipe::Cli::DIR+'/examples/app-h7.rb'
 
-
-describe AppH7, 'after the call to parse_definition' do
-
-  it "should have switches_by_name and switches_by_type ok (h13)" do
-    @app = AppH7.new
-    c = @app.cli.commands['gen_me']
-    c.my_get_option_values!
-    c.switches_by_name.size.should.equal 2
-    c.switches_by_type.size.should.equal 1
-    c.switches_by_type[Hipe::Cli::Switch].size.should.equal 2
-  end
-
-  it "elements should reflect via type(h14)" do
-    @app = AppH7.new
-    @c = @app.cli.commands['gen_me']
-    elements = @c.elements
-    elements.positionals.size.should.equal 0
-    elements.positional.size.should.equal 0
-    elements.required.size.should.equal 0
-    elements.options.size.should.equal 2
-    elements.option.size.should.equal 2
-    elements.optionals.size.should.equal 0
-  end
-  it "positionals size (h15)" do
-    @app = AppH7.new
-    @c = @app.cli.commands['no_touch']
-    @els = @c.elements
-    @els.positional.size.should.equal 4
-    @els.positionals.size.should.equal 4
-  end
-  it "requires size (h16)" do
-    @els.required.size.should.equal 2
-    @els.requireds.size.should.equal 2
-  end
-  it "options size (h17)" do
-    @els.options.size.should.equal 3
-    @els.option.size.should.equal 3
-  end
-  it "optionals size (h18)" do
-    @els.optionals.size.should.equal 2
-    @els.optional.size.should.equal 2
-  end
-end
-
 class AppH1
   include Hipe::Cli
 end
@@ -126,3 +82,47 @@ describe AppH11 do
     x.should.match(Regexp.new(Regexp.escape('[...[...[..[.]]]]')))
   end
 end
+
+describe AppH7, 'after the call to parse_definition' do
+
+  it "should have switches_by_name and switches_by_type ok (h13)" do
+    @app = AppH7.new
+    c = @app.cli.commands['gen_me']
+    c.my_get_option_values!
+    c.switches_by_name.size.should.equal 2
+    c.switches_by_type.size.should.equal 1
+    c.switches_by_type[Hipe::Cli::Switch].size.should.equal 2
+  end
+
+  it "elements should reflect via type(h14)" do
+    @app = AppH7.new
+    @c = @app.cli.commands['gen_me']
+    elements = @c.elements
+    elements.positionals.size.should.equal 0
+    elements.positional.size.should.equal 0
+    elements.required.size.should.equal 0
+    elements.options.size.should.equal 2
+    elements.option.size.should.equal 2
+    elements.optionals.size.should.equal 0
+  end
+  it "positionals size (h15)" do
+    @app = AppH7.new
+    @c = @app.cli.commands['no_touch']
+    @els = @c.elements
+    @els.positional.size.should.equal 4
+    @els.positionals.size.should.equal 4
+  end
+  it "requires size (h16)" do
+    @els.required.size.should.equal 2
+    @els.requireds.size.should.equal 2
+  end
+  it "options size (h17)" do
+    @els.options.size.should.equal 3
+    @els.option.size.should.equal 3
+  end
+  it "optionals size (h18)" do
+    @els.optionals.size.should.equal 2
+    @els.optional.size.should.equal 2
+  end
+end
+

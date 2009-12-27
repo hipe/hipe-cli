@@ -14,7 +14,7 @@ class HipeCliCli
   include Hipe::Cli
   cli.graceful{|e| e if GentestException === e}
   cli.does('-h','--help', 'help<<self')
-  cli.out.class = Hipe::Io::GoldenHammer
+  cli.out.klass = Hipe::Io::GoldenHammer
   cli.default_command = :help
   cli.does(:aliases, "outputs the lines to make aliases for each of the"+
                     " example applications in the examples folder.  If you want to "+
@@ -55,12 +55,21 @@ class HipeCliCli
     # run_with    "command" | "cli" | "app"
     # app_regen   whether or not to create a new instance of the app each time (default false)
     # describe    describe YourApp, "<your text" do
-    required('INPUT_FILE', 'the file of copy-pasted terminal stuff'){ |it|
+    splat('INPUT_FILE', 'the file of copy-pasted terminal stuff', :minimum => 1){ |it|
       it.must_exist!.gets_opened('r')
     }
   end
 
-  def gentest(infile, cmd_line_opts)
+  def gentest(infiles, cmd_line_opts)
+    out = cli.out.new
+    infiles.each do |file|
+      out.puts '*' * 30 + " #{file.path} " + '*' * 30
+      out.puts _gentest(file, cmd_line_opts, out)
+    end
+    out
+  end
+
+  def _gentest(infile, cmd_line_opts, notice)
     Hipe::Io::StackLike[infile]
     cmd_line_opts.sped_up = true if cmd_line_opts.sped_up.nil?
     basename = File.basename(infile.path)
@@ -80,11 +89,11 @@ class HipeCliCli
 
     missing = nil
     raise ge(%{missing (#{missing * ', '}) in json header of #{infile.path}}) if
-      (missing = [:klass, :prompt, :requires] - opts.keys).size > 0
-    test_cases = parse_test_cases(infile, opts.prompt)
+      (missing = [:construct, :prompt, :requires] - opts.keys).size > 0
+    test_cases = parse_test_cases(infile, opts.prompt, notice)
     shell_expansion(test_cases,opts)
-    str = write_bacon_file( infile,   opts.out_file,   outfile_short,  test_cases,       opts.requires,
-                         opts.klass,  opts.describe,   opts.letter,    filename_inner,   opts
+    str = write_bacon_file( infile,      opts.out_file,   outfile_short,  test_cases,       opts.requires,
+                         opts.construct, opts.describe,   opts.letter,    filename_inner,   opts
     )
     def str.valid?; true end
     str
@@ -125,15 +134,13 @@ class HipeCliCli
     fh.pop while( fh.peek =~ /^(:? *#|(?: *$))/ )
     if fh.peek =~ /^ *\{/
       begin;  p = fh.pop; (lines << p.chomp) if p end until( (p =~ /\} *$/) || p.nil? )
-      json_string = (lines.compact * ' ').gsub(/  */,' ')
+      json_string = (lines.compact * "\n").gsub(/  */,' ')
       begin
         json_hash = JSON.parse(json_string)
       rescue JSON::ParserError => e
         raise ge <<-HERE.gsub(/^  /,'')
-        Failed to parse the beginning of #{infh.fhname} as json:
+        Failed to parse the beginning of #{fh.path} as json:
         #{e.message}
-        With Line:
-        #{json_string.inspect}}
         HERE
       end
     else
@@ -170,8 +177,8 @@ class HipeCliCli
   end
 
   # we really avoided using racc @todo
-  def parse_test_cases(infile, prompt)
-    @notice ||= $stdout
+  def parse_test_cases(infile, prompt, notice=nil)
+    @notice ||= (notice || $stdout)
     new_struct = lambda {
       struct = Hipe::OpenStructWriteOnceExtension.new(:response_lines => [])
       struct.write_once! :prompt, :result_lines
@@ -242,7 +249,7 @@ class HipeCliCli
   def putz x; @out.puts x end
 
   def write_bacon_file(infile,         outfilename,  outfile_short, test_cases,   requires,
-                       app_class_name, describee,    letter,        filename_inner, opts
+                       construct,      describee,    letter,        filename_inner, opts
   )
     @out = Hipe::Io::BufferString.new
     run_it_with_this = %{bacon -n '.*' #{outfile_short}}
@@ -282,7 +289,7 @@ class HipeCliCli
       x = nil
       ge(%{Parse failure of prompt: Expecting #{cli.program_name} had #{x}}) unless
         (cli.program_name==(x=test_case.parsed_prompt.shift))
-      putz %{    @app = #{app_class_name}.new } if (0==idx  or opts.app_regen)
+      putz %{    @app = #{construct} } if (0==idx  or opts.app_regen)
       case opts.run_with
       when "command"
         cmd = test_case.parsed_prompt.shift

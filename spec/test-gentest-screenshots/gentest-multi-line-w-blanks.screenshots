@@ -4,7 +4,7 @@
   "requires" : "hipe-cli",
   "module" : "Hipe::Cli",  
   "relative_requires":["examples/app-it3-predicates"],
-  "klass"  : "AppIt3"
+  "construct"  : "AppIt3.new"
 }
 
 # see if you can parse a multiline 

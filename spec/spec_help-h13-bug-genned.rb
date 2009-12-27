@@ -1,10 +1,10 @@
 # bacon -n '.*' spec/spec_help-h13-bug-genned.rb
 require 'hipe-cli'
 require File.join(Hipe::Cli::DIR,'examples/app-h13-bug')
-require 'ruby-debug'
+
 
 # You may not want to edit this file.  It was generated from data in "help-h13-bug.screenshots"
-# by hipe-cli gentest on 2009-12-25 03:35.
+# by hipe-cli gentest on 2009-12-27 00:00.
 # If tests are failing here, it means that either 1) the gentest generated
 # code that makes tests that fail (it's not supposed to do this), 2) That there is something incorrect in
 # your "screenshot" data, or 3) that your app or hipe-cli has changed since the screenshots were taken
@@ -16,19 +16,20 @@ require 'ruby-debug'
 
 describe "Generated test (generated tests)" do
 
-  it "should work (gt-0)" do
+  it "h13 (h13-0)" do
     @app = AppH13.new
-    x = @app.cli.commands["something"].run(["-h"])
+    x = @app.cli.commands[""].run([])
     y =<<-__HERE__.gsub(/^    /,'').chomp
-    something - description of something
+    usage: h13 [-h|--help] COMMAND [OPTIONS] [ARG1 [ARG2 [...]]]
 
-    Usage: h13 something [-h]
-        -h
+    Available subcommands are:
+            help
+            something                    description of something
     __HERE__
     x.to_s.chomp.should.equal y
   end
 
-  it "should work (gt-1)" do
+  it "h13 something -h (h13-1)" do
     x = @app.cli.commands["something"].run(["-h"])
     y =<<-__HERE__.gsub(/^    /,'').chomp
     something - description of something

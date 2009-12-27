@@ -1,4 +1,5 @@
 # bacon spec/spec_optparsey.rb
+
 require 'hipe-cli'
 require Hipe::Cli::DIR+'/examples/app-op1-original-optparse.rb'
 
@@ -31,7 +32,7 @@ describe AppOp1 do
     response.should.equal %{decibles is "implementation says "27"implementation says "26""}
   end
 
-  it "uses short name when there is no long name" do
+  it "uses short name when there is no long name (opt3)" do
     @app = AppOp1.new
     @app.cli.run(['dance','-aBLAH']).should.equal %{dancing: "BLAH"}
   end

@@ -110,4 +110,3 @@ class OptparseExample
 end  # class OptparseExample
 
 options = OptparseExample.parse(ARGV)
-pp options

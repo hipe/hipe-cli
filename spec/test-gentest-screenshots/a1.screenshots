@@ -5,7 +5,7 @@
   "requires" : "hipe-cli",
   "module" : "Hipe::Cli",  
   "relative_requires":["examples/app-it3-predicates"],
-  "klass"  : "AppIt3"
+  "construct"  : "AppIt3.new"
 }
 
 # forgot name

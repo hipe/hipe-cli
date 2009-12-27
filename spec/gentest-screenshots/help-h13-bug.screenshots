@@ -1,20 +1,23 @@
+# hipe-cli gentest spec/gentest-screenshots/help-h13-bug.screenshots
 # This is a gentest screenshot file. Please see hipe-cli gentest.
 { 
   "prompt" : "~/c > ",
   "requires" : "hipe-cli",
   "relative_requires":["examples/app-h13-bug"],
-  "klass"  : "AppH13",
-  "module" : "Hipe::Cli"
+  "construct"  : "AppH13.new",
+  "module" : "Hipe::Cli",
+  "letter" : "h13"
 }
 
+~/c > h13
+usage: h13 [-h|--help] COMMAND [OPTIONS] [ARG1 [ARG2 [...]]]
+
+Available subcommands are:
+        help
+        something                    description of something
+
 ~/c > h13 something -h
 something - description of something
 
-Usage: app-h13-bug something [-h]
+Usage: h13 something [-h]
     -h
-~/c > h13 something -h
-something - description of something
-
-Usage: app-h13-bug something [-h]
-    -h
-~/c >
