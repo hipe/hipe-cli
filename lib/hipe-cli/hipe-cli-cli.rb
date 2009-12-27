@@ -9,7 +9,15 @@ require 'hipe-core/lingual/en'
 require 'hipe-core/test/helper'
 
 class HipeCliCli
-  class GentestException < Hipe::Exception; end
+  class GentestException < Hipe::Exception
+    def message
+      spr = super
+      if (@details[:line_no])
+        spr << %{ at #{File.basename(@details[:path])} line #{@details[:line_no]}}
+      end
+      spr
+    end  
+  end
   attr_accessor :notice
   include Hipe::Cli
   cli.graceful{|e| e if GentestException === e}
@@ -79,7 +87,7 @@ class HipeCliCli
     opts = parse_json_header(infile)
     opts.merge! cmd_line_opts
     if (opts.out_file)
-      raise ge(%{sorrry expected output file #{opts.out_file.inspect} to be in pwd #{Dir.pwd.inspect}}) unless
+      raise ge(%{sorry expected output file #{opts.out_file.inspect} to be in pwd #{Dir.pwd.inspect}}) unless
         (md = Regexp.new('^'+Regexp.escape(Dir.pwd)+'/(.+)$').match(opts.out_file))  # @SEP
       outfile_short = md[1]
     else
@@ -90,8 +98,17 @@ class HipeCliCli
     missing = nil
     raise ge(%{missing (#{missing * ', '}) in json header of #{infile.path}}) if
       (missing = [:construct, :prompt, :requires] - opts.keys).size > 0
-    test_cases = parse_test_cases(infile, opts.prompt, notice)
+    begin      
+      test_cases = parse_test_cases(infile, opts.prompt, notice)
+    rescue GentestException => e
+      if (e.details[:on_line])
+        e.details[:line_no] = infile.offset
+        e.details[:path] = infile.path
+      end
+      raise e
+    end
     shell_expansion(test_cases,opts)
+
     str = write_bacon_file( infile,      opts.out_file,   outfile_short,  test_cases,       opts.requires,
                          opts.construct, opts.describe,   opts.letter,    filename_inner,   opts
     )
@@ -209,7 +226,8 @@ class HipeCliCli
     blank_re = /^ *$/
 
     capture = nil
-    infile.each_line do |line|
+    line_no = 0
+    while (line = infile.pop)     # infile.each_line do |line|
       line.chomp!
       if (md = directive_re.match(line))
         directive = md[1]
@@ -242,7 +260,10 @@ class HipeCliCli
       when comment_re
         case state
         when :start,:comment then
-        when :prompt then raise ge(%{comments should not come between prompt and response})
+        when :prompt
+          raise ge((%{comments should not come between prompt and response}<<
+          %{ (interpreting this line as a comment: "#{line}")}),
+          :on_line=>true)
         when :response then advance.call
         else raise gge(%{invalid state #{state.inspect}})
         end
@@ -251,13 +272,15 @@ class HipeCliCli
         case state
         when :start,:comment then
         when :response then advance.call
-        when :prompt then raise ge(%{a prompt after a prompt?})
+        when :prompt then raise ge(%{a prompt after a prompt?},:on_line=>true)
         else raise gge(%{invalid state #{state.inspect}})
         end
         change_state.call(:prompt, $1) # eew
       else
         case state
-        when :comment then raise ge(%{comments should not come between prompt and response})
+        when :comment
+          raise ge(%{Failed to parse the following line. It didn't look like a comment, prompt, etc:\n"#{line}"},
+          :on_line=>true)
         when :response,:prompt then
         else raise gge(%{invalid state #{state.inspect}})
         end
