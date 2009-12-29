@@ -85,7 +85,7 @@ class HipeCliCli
       (md = basename.match(/^([^\.]+).screenshots$/))
     filename_inner = md[1]
     opts = parse_json_header(infile)
-    opts.merge! cmd_line_opts
+    opts.merge! cmd_line_opts._table
     if (opts.out_file)
       raise ge(%{sorry expected output file #{opts.out_file.inspect} to be in pwd #{Dir.pwd.inspect}}) unless
         (md = Regexp.new('^'+Regexp.escape(Dir.pwd)+'/(.+)$').match(opts.out_file))  # @SEP
@@ -97,7 +97,7 @@ class HipeCliCli
 
     missing = nil
     raise ge(%{missing (#{missing * ', '}) in json header of #{infile.path}}) if
-      (missing = [:construct, :prompt, :requires] - opts.keys).size > 0
+      (missing = [:construct, :prompt, :requires] - opts._table.keys).size > 0
     begin      
       test_cases = parse_test_cases(infile, opts.prompt, notice)
     rescue GentestException => e
@@ -226,7 +226,6 @@ class HipeCliCli
     blank_re = /^ *$/
 
     capture = nil
-    line_no = 0
     while (line = infile.pop)     # infile.each_line do |line|
       line.chomp!
       if (md = directive_re.match(line))
@@ -350,13 +349,14 @@ class HipeCliCli
       else
         raise ArgumentError.new(%{Bad value for run_with -- "#{opts.run_with}"})
       end
+      
+      test_case.response_lines.pop while test_case.response_lines.last =~ /^ *$/      
       if (test_case.captures['code'])
         putz test_case.captures['code'].lines.map{|x| %{  #{x}}} * "\n"
       elsif (test_case.response_lines.size <= 1)
         putz %{    y = #{test_case.response_lines.join.dump}}
         putz %{    x.to_s.chomp.should.equal y}
       else
-        test_case.response_lines.pop while test_case.response_lines.last =~ /^ *$/
         putz <<-HERE1.gsub(/^      /,'')
           y =<<-__HERE__.gsub(/^    /,'').chomp
           #{test_case.response_lines.join("\n          ")}

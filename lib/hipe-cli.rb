@@ -205,7 +205,7 @@ module Hipe
       end
       def graceful(&block); @gracefuls << block end
       def help(command_name,opts)
-        return help_recursive(0,opts.table.values.flatten.size) if command_name.nil? && (opts.keys & [:h, :help, :"?"]).size > 0
+        return help_recursive(0,opts.table.values.flatten.size) if command_name.nil? && (opts._table.keys & [:h, :help, :"?"]).size > 0
         opts = OptionParser.new # hack3 just to use its display.  See Version 0.0.2 also
         list = opts.instance_variable_get('@stack')[2]
         commands_size = @commands.size
@@ -348,6 +348,7 @@ module Hipe
           raise GrammarGrammarException[%{for "#{long.first||short.first}" to have a default value it must have a }+
            %{required argument in its definition (e.g. "#{long.first||short.first} ARG") not "#{@arg}"}]
         end
+        raise TypeError.new(%{For now defaults must be strings, not #{value.inspect}}) unless value.kind_of? String
         @has_default = true
         @default = value
       end
@@ -611,7 +612,7 @@ module Hipe
               apply_defaults(Positional,new_argv) if @has_defaults
               opts.parse!(new_argv)
             end
-            missing = (@switches_by_type[Required].map{|x| x.main_name} - values.keys).map{|x| @switches_by_name[x]}
+            missing = (@switches_by_type[Required].map{|x| x.main_name} - values._table.keys).map{|x| @switches_by_name[x]}
             if (@switches_by_type[Splat].size > 0)
               splat = @switches_by_type[Splat][0]
               if (splat.minimum && argv.size < splat.minimum)
@@ -630,7 +631,7 @@ module Hipe
                if ( values==false && univ_values.nil? ) then nil
             elsif ( values==false && univ_values ) then univ_values
             elsif ( values        && univ_values.nil? ) then values
-            elsif ( values        && univ_values ) then univ_values.merge!(values); univ_values
+            elsif ( values        && univ_values ) then univ_values.merge!(values._table); univ_values
             else; raise Exception['never'] end
             args_for_implementer = flatten_args(@switches_by_type, merged_values, !univ_values.nil?)
             Interrupt[:because=>:validation_failures] if @validation_failures.size > 0
@@ -715,7 +716,7 @@ module Hipe
             s << ' '+%{[#{elements.splat.main_name} [#{elements.splat.main_name} [...]]]} if (elements.splat)
             @option_parser.banner = s
           end
-          Interrupt[:because=>:done, :return => @option_parser.to_s]
+          Interrupt[:because=>:done, :return => Hipe::Io::GoldenHammer[@option_parser.to_s]]
         end
       end
       def goto(&block); Interrupt[:because=>:goto, :block=>block] end #appropriately named
