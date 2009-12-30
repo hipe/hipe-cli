@@ -41,6 +41,6 @@
 * 1 major enhancement
   * existence (apologies to webrat)
 == THE DISTANT FUTURE, THE YEAR 2000
-  * generate descriptions for command elements from dsl
   * address @todo's in the code
-  * maybe or maybe not get rid of optiony-looking commands
+  * make validation api look/work like data-mappers, consider pushing it into hipe-core/loquacious
+  * after above generate descriptions for command elements from dsl

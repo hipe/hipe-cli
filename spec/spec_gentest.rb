@@ -28,19 +28,19 @@ describe "hipe-cli cli GENTEST" do
     @a = HipeCliCli.new
     filething = Paths.singleton.filething 'gentest-one-line-json.screenshots'
     json = @a.parse_json_header(filething)
-    json.table.keys.map{|x| x.to_s}.sort.should.equal ["construct", "describe", "letter", "prompt", "requires"]
+    json._table.keys.map{|x| x.to_s}.sort.should.equal ["construct", "describe", "letter", "prompt", "requires"]
   end
 
   it "should parse good json multi line (gt2)" do
     filething = Paths.singleton.filething 'gentest-multi-line-json.screenshots'
     json = @a.parse_json_header(filething)
-    json.table.keys.map{|x| x.to_s}.sort.should.equal ["construct", "describe", "letter", "module", "prompt", "relative_requires", "requires"]
+    json._table.keys.map{|x| x.to_s}.sort.should.equal ["construct", "describe", "letter", "module", "prompt", "relative_requires", "requires"]
   end
 
   it "should parse no json (gt3)" do
     @filething = Paths.singleton.filething 'gentest-no-json.screenshots'
     json = @a.parse_json_header(@filething)
-    json.table.keys.map{|x| x.to_s}.sort.should.equal ["describe", "letter"]
+    json._table.keys.map{|x| x.to_s}.sort.should.equal ["describe", "letter"]
   end
 
   it "should raise on no json (gt4)" do

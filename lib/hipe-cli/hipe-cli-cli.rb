@@ -16,7 +16,7 @@ class HipeCliCli
         spr << %{ at #{File.basename(@details[:path])} line #{@details[:line_no]}}
       end
       spr
-    end  
+    end
   end
   attr_accessor :notice
   include Hipe::Cli
@@ -98,7 +98,7 @@ class HipeCliCli
     missing = nil
     raise ge(%{missing (#{missing * ', '}) in json header of #{infile.path}}) if
       (missing = [:construct, :prompt, :requires] - opts._table.keys).size > 0
-    begin      
+    begin
       test_cases = parse_test_cases(infile, opts.prompt, notice)
     rescue GentestException => e
       if (e.details[:on_line])
@@ -349,8 +349,8 @@ class HipeCliCli
       else
         raise ArgumentError.new(%{Bad value for run_with -- "#{opts.run_with}"})
       end
-      
-      test_case.response_lines.pop while test_case.response_lines.last =~ /^ *$/      
+
+      test_case.response_lines.pop while test_case.response_lines.last =~ /^ *$/
       if (test_case.captures['code'])
         putz test_case.captures['code'].lines.map{|x| %{  #{x}}} * "\n"
       elsif (test_case.response_lines.size <= 1)

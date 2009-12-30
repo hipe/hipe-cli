@@ -57,7 +57,7 @@ describe AppH7, 'larger' do
     @app.cli.run(['-h']).should.match(%r{boofhell.*blearg}m)
   end
   it "should display about blearg (h8)" do
-    @app.cli.run(['blearg','-h']).should.match(%r{REQ1.*REQ2.*OPT1.*OPT2}m)
+    @app.cli.run(['blearg','-h']).to_s.should.match(%r{REQ1.*REQ2.*OPT1.*OPT2}m)
   end
   it "pass on valid input (h9)" do
     @app.cli.run(['blearg','-c','clean','flim','flam','shoo-by','doo-by']).should.

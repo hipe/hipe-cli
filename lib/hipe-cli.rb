@@ -205,7 +205,7 @@ module Hipe
       end
       def graceful(&block); @gracefuls << block end
       def help(command_name,opts)
-        return help_recursive(0,opts.table.values.flatten.size) if command_name.nil? && (opts._table.keys & [:h, :help, :"?"]).size > 0
+        return help_recursive(0,opts._table.values.flatten.size) if command_name.nil? && (opts._table.keys & [:h, :help, :"?"]).size > 0
         opts = OptionParser.new # hack3 just to use its display.  See Version 0.0.2 also
         list = opts.instance_variable_get('@stack')[2]
         commands_size = @commands.size
@@ -348,7 +348,10 @@ module Hipe
           raise GrammarGrammarException[%{for "#{long.first||short.first}" to have a default value it must have a }+
            %{required argument in its definition (e.g. "#{long.first||short.first} ARG") not "#{@arg}"}]
         end
-        raise TypeError.new(%{For now defaults must be strings, not #{value.inspect}}) unless value.kind_of? String
+        raise TypeError.new(
+          %{For now defaults must be strings (as they would be when arguments are parsed from the command line), }<<
+          %{not #{value.inspect}}
+        ) unless value.kind_of? String
         @has_default = true
         @default = value
       end
