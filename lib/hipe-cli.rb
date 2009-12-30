@@ -994,6 +994,14 @@ module Hipe
         end
         it
       end
+      def must_be_positive_integer(message_template=nil)
+        nu = must_be_integer(message_template)
+        if (nu.kind_of?(Fixnum) && nu < 0 )
+          message_template ||= %{Your value for %human_name% ("%provided_value%") must be a positive integer}
+          add_validation_failure ValidationFailure.f(:message_template=>message_template, :type=>:range_failure)
+          nu
+        end
+      end
       # this assertion implies that the thing must be a float (maybe it must be an integer, too!) but it does no casting.
       def must_match_range(range,message_template=nil)
         if ! (md = /^-?\d+(?:\.?\d+)?$/=~self)
