@@ -996,9 +996,11 @@ module Hipe
       end
       def must_be_positive_integer(message_template=nil)
         nu = must_be_integer(message_template)
-        if (nu.kind_of?(Fixnum) && nu < 0 )
+        if nu.kind_of?(Fixnum) && nu < 0
           message_template ||= %{Your value for %human_name% ("%provided_value%") must be a positive integer}
           add_validation_failure ValidationFailure.f(:message_template=>message_template, :type=>:range_failure)
+          false
+        else
           nu
         end
       end

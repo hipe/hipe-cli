@@ -85,14 +85,14 @@ describe "Specific Builtin Predicates" do
   end
 
   def make_two_files
-    @helper.clear_writable_tmp_dir!
-    d = @helper.writable_tmp_dir
+    @helper.clear_writable_temporary_directory!
+    d = @helper.writable_temporary_directory
     @exists = File.join(d,'must-exist')
     File.open(@exists,'w+'){|fh| fh.write("blah\nand blah.")}
     @doesnt_exist = File.join(d,'not-exist')
   end
   def cleanup
-    @helper.clear_writable_tmp_dir!
+    @helper.clear_writable_temporary_directory!
   end
 
   it  "should run filesystem predicates (pred1)" do
@@ -106,7 +106,7 @@ describe "Specific Builtin Predicates" do
     make_two_files
     rs = @app.cli.commands['laundry'].run([@doesnt_exist,@exists])
     rs.to_s.should.match %r{file not found.+not-exist}mi
-    @helper.clear_writable_tmp_dir!
+    @helper.clear_writable_temporary_directory!
   end
 end
 

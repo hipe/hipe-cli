@@ -52,7 +52,7 @@ describe "hipe-cli cli GENTEST" do
   end
 
   it "should parse the test cases and write a file! (gt5)" do
-    Hipe::Test::Helper[Hipe::Cli].clear_writable_tmp_dir!
+    Hipe::Test::Helper[Hipe::Cli].clear_writable_temporary_directory!
     @a = HipeCliCli.new
     @a.notice = Hipe::Io::BufferString.new
     in_path = Paths.singleton.filepath 'gentest-multi-line-json.screenshots'
@@ -62,13 +62,13 @@ describe "hipe-cli cli GENTEST" do
     rs.valid?.should.equal true
     rs.to_s.should.match %r{Generated spec file}i
     #notice_stream << rs
-    Hipe::Test::Helper[Hipe::Cli].clear_writable_tmp_dir!     # for now we don't test it,
+    Hipe::Test::Helper[Hipe::Cli].clear_writable_temporary_directory!     # for now we don't test it,
     # and we have to remove it so rcov doesn't try to generate coverage for it after it
     # has been deleted by subsequent tests!
   end
 
   it "should write test file when input has blanks (gt6)" do
-    Hipe::Test::Helper[Hipe::Cli].clear_writable_tmp_dir!
+    Hipe::Test::Helper[Hipe::Cli].clear_writable_temporary_directory!
     @a = HipeCliCli.new
     @a.notice = Hipe::Io::BufferString.new
     in_path = Paths.singleton.filepath 'gentest-multi-line-w-blanks.screenshots'
@@ -78,7 +78,7 @@ describe "hipe-cli cli GENTEST" do
     rs.valid?.should.equal true
     rs.to_s.should.match %r{Generated spec file}i
     #notice_stream << rs
-    Hipe::Test::Helper[Hipe::Cli].clear_writable_tmp_dir!
+    Hipe::Test::Helper[Hipe::Cli].clear_writable_temporary_directory!
   end
 
   # this test works but it won't respect other command line opts so we can't control the output folder
@@ -101,7 +101,7 @@ describe "hipe-cli cli GENTEST" do
     rs.valid?.should.equal true
     rs.to_s.should.match %r{Generated spec file}i
     #notice_stream << rs
-    Hipe::Test::Helper[Hipe::Cli].clear_writable_tmp_dir!
+    Hipe::Test::Helper[Hipe::Cli].clear_writable_temporary_directory!
   end
 
   it "should handle literal code block directives (gt9)" do
@@ -114,6 +114,6 @@ describe "hipe-cli cli GENTEST" do
     #rs.valid?.should.equal true
     rs.to_s.should.match %r{Generated spec file}i
     #notice_stream << rs
-    Hipe::Test::Helper[Hipe::Cli].clear_writable_tmp_dir!
+    Hipe::Test::Helper[Hipe::Cli].clear_writable_temporary_directory!
   end
 end
