@@ -75,8 +75,6 @@ class AppPred1
   end
 end
 
-
-
 describe "Specific Builtin Predicates" do
   it  "before all (pred0)" do
     @app = AppPred1.new

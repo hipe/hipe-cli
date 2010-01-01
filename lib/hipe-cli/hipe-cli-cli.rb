@@ -1,7 +1,7 @@
 require 'orderedhash'
 require 'json'
 require 'hipe-cli'
-require 'hipe-core/io/buffer-string'
+require 'hipe-core/io/flushing-buffer-string'
 require 'hipe-core/io/stack-like'
 require 'hipe-core/struct/open-struct-common-extension'
 require 'hipe-core/struct/open-struct-write-once-extension'
@@ -337,7 +337,7 @@ class HipeCliCli
       x = nil
       ge(%{Parse failure of prompt: Expecting #{cli.program_name} had #{x}}) unless
         (cli.program_name==(x=test_case.parsed_prompt.shift))
-      putz %{    @app = #{construct} } if (0==idx  or opts.app_regen)
+      putz %{    @app = #{construct}} if (0==idx  or opts.app_regen)
       case opts.run_with
       when "command"
         cmd = test_case.parsed_prompt.shift

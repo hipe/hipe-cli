@@ -236,7 +236,7 @@ module Hipe
     end
     class Out
       attr_accessor :klass
-      def new; @klass.new end  # note this is not the class method but an instance method
+      def new(*args); @klass.new(*args) end  # note this is not the class method but an instance method
     end
     class Commands < OrderedHash
       attr_reader :aliases
