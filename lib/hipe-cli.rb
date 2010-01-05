@@ -204,7 +204,9 @@ module Hipe
         rs
       end
       def graceful(&block); @gracefuls << block end
-      def help(command_name,opts)
+      def help(*argv)
+        opts = argv.pop if argv.last.kind_of? OptionValues # not used
+        command_name = argv[0] # might be nil
         return help_recursive(0,opts._table.values.flatten.size) if command_name.nil? && (opts._table.keys & [:h, :help, :"?"]).size > 0
         opts = OptionParser.new # hack3 just to use its display.  See Version 0.0.2 also
         list = opts.instance_variable_get('@stack')[2]
