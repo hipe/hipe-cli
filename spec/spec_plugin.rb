@@ -1,8 +1,8 @@
 # bacon spec/spec_plugin.rb
 require 'hipe-cli'
-require Hipe::Cli::DIR+'/examples/app-p1-plugins.rb'
+require Hipe::Cli::DIR+'/examples/app-p4-plugins.rb'
 
-describe AppP1, "plugins" do
+describe AppP4, "plugins" do
 
   it "object graph (plug1)" do
     @app4 = AppP4.new

@@ -238,7 +238,10 @@ module Hipe
     end
     class Out
       attr_accessor :klass
-      def new(*args); @klass.new(*args) end  # note this is not the class method but an instance method
+      # note this is not the class method but an instance method
+      def new(*args)
+        (@klass || Hipe::Io::GoldenHammer).new(*args)
+      end
     end
     class Commands < OrderedHash
       attr_reader :aliases
@@ -359,6 +362,7 @@ module Hipe
       end
       # more code in 89af4ffda0f3b8c57cc0d6e96e5d1f463ce9e98a
       def main_name; switch_name.gsub('-','_').to_sym end
+      alias_method :name, :main_name
       def surface_name  # @todo get rid of some of the redundancy here
         /^-?-?(.+)/.match(@long[0]).captures[0]
       end

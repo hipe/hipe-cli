@@ -5,8 +5,11 @@ require 'hipe-core/io/flushing-buffer-string'
 require 'hipe-core/io/stack-like'
 require 'hipe-core/struct/open-struct-common-extension'
 require 'hipe-core/struct/open-struct-write-once-extension'
+require 'hipe-core/struct/table'
 require 'hipe-core/lingual/en'
 require 'hipe-core/test/helper'
+require 'abbrev'
+require 'readline'
 
 class HipeCliCli
   class GentestException < Hipe::Exception
@@ -370,5 +373,97 @@ class HipeCliCli
     File.open(outfilename,'w'){|fh| fh.write @out.read }
     %{\nGenerated spec file:\n#{outfilename}\n}+
     %{Try running the generated test with:\n\n#{run_it_with_this}\n\n}
+  end
+
+  cli.does('rackful','play with one of the examples interactively with rack-like command processing') do
+    optional('app_name')
+  end
+  def rackful app_name=nil
+    require 'hipe-cli/rack-land'
+    @quit_abbrevs = ['quit'].abbrev
+    default_app_name = nil
+    msg = catch(:finished) do
+      begin
+        catch(:prompt_again) do
+          app_name ||= prompt_app_name(default_app_name)
+          unless(app_thing = examples_list.detect{|x| x.short==app_name})
+            puts "app #{app_name.inspect} not found";
+            app_name = nil
+            throw :prompt_again
+          end
+          app_name = nil
+          app = app_thing.make_one
+          puts "built new #{app_thing.short}."
+          hash = nil
+          annoying = true
+          begin
+            catch(:prompt_again) do
+              hash = prompt_request
+              annoying = false
+            end
+          end while annoying
+          puts app.respond_to?(:run) ? app.run(hash).to_s : app.cli.run(hash).to_s
+        end
+      end while true
+    end
+    puts msg.to_s
+  end
+  def examples_list
+    Dir[File.join(Hipe::Cli::DIR, 'examples/*.rb')].map{|x| ExampleApp.new(x) }.sort{|x,y| x.short <=> y.short}
+  end
+  def prompt_request
+    if File.exist?("tmp.last_command")
+      default = File.read("tmp.last_command")
+      default_str = default ? %{ (#{default.slice(0,7)}...)} : ''
+      unless Readline::HISTORY.to_a.include?(default)
+        Readline::HISTORY.push(default)
+      end
+    else
+      default_str = ''
+      default = nil
+    end
+    prompt = "enter json request (hash)#{default_str}: "
+    entered = Readline.readline(prompt,true).strip
+    throw(:prompt_again) if '' == entered
+    throw(:finished, "thanks, goodbye") if @quit_abbrevs[entered]
+    File.open("tmp.last_command","w+"){|fh| fh.write(entered) }
+
+    begin
+      request = JSON.parse(entered)
+    rescue JSON::ParserError => e
+      puts e.message
+      throw :prompt_again
+    else
+      request
+    end
+  end
+  def prompt_app_name default
+    examples_list = self.examples_list
+    table = Hipe::Table.make do
+      field(:name){|x| x.short}
+      field(:description){|x| x.description}
+      self.list = examples_list
+    end
+    puts table.render(:ascii)
+    default_str = default ? " [#{default}]" : ""
+    prompt = "choose app (type beginning of name)#{default_str}: "
+    name = Readline.readline(prompt,true)
+    name = default if name=="" && default
+    throw(:finished, "thanks, goodbye.") if @quit_abbrevs[name]
+    name
+  end
+  class ExampleApp
+    attr_reader :path, :short, :description
+    def initialize(path)
+      @path = path
+      @short, thing = File.basename(path).match(/^app-([^-]+)-?(.*)\.rb$/).captures
+      @description = thing.gsub('-',' ')
+    end
+    def app_class_name; %{App#{short.capitalize}} end
+    def make_one
+      require @path
+      klass = app_class_name.split('::').inject(Object){|a,v| a.const_get(v) }
+      klass.new
+    end
   end
 end
