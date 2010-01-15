@@ -11,7 +11,7 @@ module Hipe::Cli
       out.klass ||= Hipe::Io::GoldenHammer
       cmd = nil
       return run_flat(params) if params.kind_of?(Array)
-      return out.new(:error=>"invalid rack request class #{mixed.class}") unless params.kind_of?(Hash)
+      return out.new(:error=>"invalid rack request class #{params.class}") unless params.kind_of?(Hash)
       return out.new(:error=>"no command provided") unless params['command_name']
       return out.new(:error=>"there is no #{params['command_name'].inspect} command") unless
         command = @commands[params['command_name']]
@@ -45,7 +45,9 @@ module Hipe::Cli
       elements.options.each do |el|
         intersect = params.keys & el.rack_names
         if intersect.size > 0
-          argv << (el.long[0] || el.short[0]) << params.delete(intersect[0]) # note intersect might be > 1 but caught below
+          argv << (el.long[0] || el.short[0])
+          value = params.delete(intersect[0]) # note intersect might be > 1 but caught below
+          argv << value unless value == "" # for flags that don't take parameters, the rack request should send the empty string
         end
       end
       elements.required.each do |el|
@@ -58,16 +60,20 @@ module Hipe::Cli
       elements.optionals.each do |el|
         if params.has_key? el.rack_name
           argv << params.delete(el.rack_name)
+        else
+          argv << "" # normally this wouldn't be possible from the command line.  be careful!
         end
       end
       result = out.new
       if missing_required.size > 0
-        #result.errors << ("The request is missing " << en{list(missing_required.map{|x| %{"#{x}"}})}.say << '.')
         result.errors << ("What about " << en{list(missing_required.map{|x| %{"#{x}"}})}.say << '?')
       end
-      if params.size > 0
-        # result.errors << (en{sp(np('unexpected parameter',params.keys.sort))}.say.capitalize << '.')
-        result.errors << ("What do you mean by "<<en{list(params.keys.sort.map{|x| %{"#{x}"}})}.say << '?')
+      universal_defs = application.cli.universal_definitions
+      universal_option_names = universal_defs ? universal_defs.map{|x| x.rack_name} : []
+      unexpected = params.keys.map{|x| x.to_s} - (universal_option_names + ['submit']) # hack1
+      if unexpected.size > 0
+        result.errors << ("#{full_name} asks: what do you mean by "<<
+          en{list(unexpected.sort.map{|x| %{"#{x}"}})}.say << '?')
       end
       return result unless result.valid?
       run_flat(argv)

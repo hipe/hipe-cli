@@ -303,7 +303,7 @@ class HipeCliCli
                        construct,      describee,    letter,        filename_inner, opts
   )
     @out = Hipe::Io::BufferString.new
-    run_it_with_this = %{bacon -n '.*' #{outfile_short}}
+    run_it_with_this = %{bacon #{outfile_short}}
     putz %{# #{run_it_with_this}}
     requires.each do |req|
       putz %{require '#{req}'}
@@ -337,24 +337,29 @@ class HipeCliCli
       comment = test_case.comment || test_case.prompt
       should = %{#{comment} (#{letter}-#{idx})}.dump
       putz %{\n  it #{should} do}
-      x = nil
-      ge(%{Parse failure of prompt: Expecting #{cli.program_name} had #{x}}) unless
-        (cli.program_name==(x=test_case.parsed_prompt.shift))
-      putz %{    @app = #{construct}} if (0==idx  or opts.app_regen)
-      case opts.run_with
-      when "command"
-        cmd = test_case.parsed_prompt.shift
-        putz %{    x = @app.cli.commands["#{cmd}"].run(#{test_case.parsed_prompt.inspect})}
-      when "cli"
-        putz %{    x = @app.cli.run(#{test_case.parsed_prompt.inspect})}
-      when "app"
-        putz %{    x = @app.run(#{test_case.parsed_prompt.inspect})}
-      else
-        raise ArgumentError.new(%{Bad value for run_with -- "#{opts.run_with}"})
+      unless (cli.program_name==(x=test_case.parsed_prompt.shift))
+        ge(%{Parse failure of prompt: Expecting #{cli.program_name} had #{x}})
+      end
+      putz %{    @app = #{construct}} if (0==idx or opts.app_regen and ! test_case.captures['all code'])
+
+      unless test_case.captures['all code']
+        case opts.run_with
+        when "command"
+          cmd = test_case.parsed_prompt.shift
+          putz %{    x = @app.cli.commands["#{cmd}"].run(#{test_case.parsed_prompt.inspect})}
+        when "cli"
+          putz %{    x = @app.cli.run(#{test_case.parsed_prompt.inspect})}
+        when "app"
+          putz %{    x = @app.run(#{test_case.parsed_prompt.inspect})}
+        else
+          raise ArgumentError.new(%{Bad value for run_with -- "#{opts.run_with}"})
+        end
       end
 
       test_case.response_lines.pop while test_case.response_lines.last =~ /^ *$/
-      if (test_case.captures['code'])
+      if (test_case.captures['all code'])
+        putz test_case.captures['all code'].lines.map{|x| %{  #{x}}} * "\n"
+      elsif (test_case.captures['code'])
         putz test_case.captures['code'].lines.map{|x| %{  #{x}}} * "\n"
       elsif (test_case.response_lines.size <= 1)
         putz %{    y = #{test_case.response_lines.join.dump}}

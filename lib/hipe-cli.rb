@@ -147,12 +147,15 @@ module Hipe
         get_option_values!
         @universals = @switches_by_type[Universal]
       end
+      def universal_definitions
+        @switches_by_type ? @switches_by_type[Universal] : nil
+      end
       def universal_option_values(argv)
         return nil if @definitions.size == 0
         univ_values = get_option_values!
         # find the first token in argv that looks like a switch for which we
         # have no corresponding short or long switch.  ick!
-        univ = @switches_by_name.values.map{|x| x.short + x.long}.flatten
+        univ = universal_definitions.map{|x| x.short + x.long}.flatten
         idx = argv.find_index{|x| (md=/^(-[a-z0-9])|(--[a-z0-9][-a-z0-9_]*)/i.match(x)) && (univ & md.captures).size == 0}
         later = (idx) ? argv.slice!(idx, argv.size-idx) : []
         apply_defaults(Universal, argv) if @has_defaults
@@ -270,7 +273,10 @@ module Hipe
           if (plugin)
             name = ''  # the command to the main app was the plugin name alone.  trigger its default command
           else
-            plugin_name, name = /^([^:]+):(.+)/.match(name).captures
+            unless (md = /^([^:]+):(.+)/.match(name))
+              raise ValidationFailure.f("poorly formed command name: #{name.inspect}")
+            end
+            plugin_name, name = md.captures
             unless (plugin = @cli.plugins[plugin_name])
               msg = %{Unrecognized plugin "#{plugin_name}". Known plugins are }+
                 Hipe::Lingual::List[@cli.plugins.map{|x| %{"#{x[1].cli.plugin_name}"}}].and()
@@ -605,6 +611,9 @@ module Hipe
         @values
       end
       def run(argv,univ_values=nil)
+        if univ_values.nil? and application.respond_to?(:parsed_universals)
+          univ_values = application.parsed_universals
+        end
         @validation_failures = []
         ret = merged_values = args_for_implementer = nil
         last_arg_is_optional = nil
@@ -684,8 +693,12 @@ module Hipe
         new_argv = []
         positional.each do |switch|
           break if (argv.size == 0)
-          new_argv << switch.long.first
-          new_argv << argv.shift
+          if (argv.first.nil?)
+            argv.shift # rack requests send nil when there is a trailing optional w/ not-provided optionals before it
+          else
+            new_argv << switch.long.first
+            new_argv << argv.shift
+          end
         end
         new_argv
       end
@@ -924,7 +937,7 @@ module Hipe
       def msg #note1
         msg = message
         if (@command_element && 'invalid argument' == reason)
-          msg = %{invalid value for #{@command_element.main_name}: "#{@args[1]}"}
+          msg = %{invalid value for #{@command_element.main_name}: #{@args[1].inspect}}
           if (false)
             # describe possible blah blah
           end
