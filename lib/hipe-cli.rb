@@ -1,6 +1,7 @@
 require 'rubygems'
 require 'orderedhash'
 require 'ostruct'
+require 'optparse'
 require 'hipe-core'
 require 'hipe-core/lingual/en'
 require 'hipe-core/lingual/ascii-typesetting'
